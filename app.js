@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.0.0';
+const VERSION='1.0.2';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -113,10 +113,10 @@ async function loadCfg(){cfg={...cfg,...(await kvGet('cfg')||{})};
   const h=location.hash;const m=/setup=([^&]+)/.exec(h);
   if(m){try{const o=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));if(o.bridge)cfg.bridge=o.bridge;if(o.key)cfg.key=o.key;await kvSet('cfg',cfg);toast('החיבור לדרייב הוגדר');}catch(_){toast('קישור ההגדרה לא תקין')}history.replaceState(null,'',location.pathname)}}
 async function bridgeGet(params){if(!cfg.bridge)throw new Error('nobridge');const u=new URL(cfg.bridge);Object.entries({...params,key:cfg.key}).forEach(([k,v])=>u.searchParams.set(k,v));
-  const r=await fetch(u.toString(),{redirect:'follow'});const j=await r.json();if(j.error)throw new Error(j.error);return j}
+  const r=await fetch(u.toString(),{redirect:'follow'});let j;try{j=await r.json()}catch(_){throw new Error(/\/dev(\?|$)/.test(cfg.bridge)?'dev':'notjson')}if(j.error)throw new Error(j.error);return j}
 async function bridgePost(body){if(!cfg.bridge)throw new Error('nobridge');
   const r=await fetch(cfg.bridge,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...body,key:cfg.key}),redirect:'follow'});
-  const j=await r.json();if(j.error)throw new Error(j.error);return j}
+  let j;try{j=await r.json()}catch(_){throw new Error(/\/dev(\?|$)/.test(cfg.bridge)?'dev':'notjson')}if(j.error)throw new Error(j.error);return j}
 function blobToB64(b){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(String(fr.result).split(',')[1]);fr.onerror=rej;fr.readAsDataURL(b)})}
 function b64ToBlob(b64,mime){const bin=atob(b64);const a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);return new Blob([a],{type:mime})}
 
@@ -160,7 +160,8 @@ async function refreshCases(){try{toast('מעדכן מהמשרד…');const j=aw
   let n=0;for(const c of cases){if(!c.driveFolderId||(c.plans&&c.plans.length))continue;try{const f=await bridgeGet({action:'files',folderId:c.driveFolderId});const pick=(f.files||[]).filter(x=>x.mime==='application/pdf'||/היתר|תשריט|תכנית|תוכנית/.test(x.name)).filter(x=>/היתר|תשריט|תכנית|תוכנית|תיק בניין|בית משותף|plan/i.test(x.name+' '+(x.folder||''))).slice(0,6);
       c.plans=[];for(const x of pick){if(x.size>15e6)continue;const d=await bridgeGet({action:'file',id:x.id});const k='plan:'+x.id;await blobPut(k,b64ToBlob(d.data,d.mime));c.plans.push({k,name:x.name,mime:d.mime});n++}}catch(_){}}
   await kvSet('cases',cases);if(n)toast(`נשמרו ${n} קבצי תשריט/היתר לשימוש בלי אינטרנט`);
-}catch(e){toast(e.message==='key'?'המפתח שגוי. בדקו את ההגדרות.':'העדכון נכשל. בדקו את החיבור ואת ההגדרות.')}home()}
+}catch(e){toast(errText(e),6000)}home()}
+function errText(e){const m=e&&e.message;return m==='key'?'המפתח שגוי. בדקו את ההגדרות.':m==='dev'?'כתובת הגשר מסתיימת ב-/dev (כתובת בדיקה). צריך את הכתובת שמסתיימת ב-/exec מ-Deploy ← Manage deployments.':m==='notjson'?'הגשר לא החזיר נתונים. בדקו שהגשר פרוס כ-Web app עם גישה ל-Anyone ושהכתובת מסתיימת ב-/exec.':m==='nobridge'?'החיבור לדרייב עוד לא הוגדר.':'העדכון נכשל. בדקו את החיבור לאינטרנט.'}
 
 /* ---------------- visit editor ---------------- */
 async function openVisit(id){cur=await visitGet(id);if(!cur)return home();tab='head';renderVisit()}
@@ -366,7 +367,7 @@ async function syncVisit(){if(!navigator.onLine){toast('אין חיבור לאי
     if(cur.plan?.base){set('מעלה תשריט…');const b=await renderPlanBlob();const r=await bridgePost({action:'upload',folderId:cur.folderId,caseNo:cur.caseNo,sub:'',name:`תשריט מסומן ${cur.caseNo||''} (${new Date().toLocaleString('sv').slice(0,16).replace(':','.')}).png`,mime:'image/png',data:await blobToB64(b)});if(r.folderId&&!cur.folderId)cur.folderId=r.folderId}
     set('מעלה טופס…');const r=await bridgePost({action:'visit',folderId:cur.folderId,caseNo:cur.caseNo,json:JSON.stringify(visitData(cur)),html:reportHtml(cur)});if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;
     cur.synced=new Date().toISOString();cur.dirtyAfterSync=false;await visitPut(cur);toast('הביקור הועלה לתיקיית התיק בדרייב ✓',3500)}
-  catch(e){toast(e.message==='key'?'המפתח שגוי. בדקו את ההגדרות.':e.message==='nofolder'?'לא נמצאה תיקיית התיק בדרייב. בדקו את מספר התיק.':'ההעלאה נעצרה. מה שהועלה נשמר, ואפשר ללחוץ שוב כדי להמשיך.',4500);await visitPut(cur)}
+  catch(e){toast(['dev','notjson'].includes(e.message)?errText(e):e.message==='key'?'המפתח שגוי. בדקו את ההגדרות.':e.message==='nofolder'?'לא נמצאה תיקיית התיק בדרייב. בדקו את מספר התיק.':'ההעלאה נעצרה. מה שהועלה נשמר, ואפשר ללחוץ שוב כדי להמשיך.',4500);await visitPut(cur)}
   renderVisit();if(tab==='photos')fillThumbs();if(tab==='plan')fillPlanThumb()}
 
 /* ---------------- events ---------------- */
