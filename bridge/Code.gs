@@ -1,6 +1,7 @@
 /**
  * ברוק · גשר בין אפליקציית הביקור לגוגל דרייב
  * רץ בחשבון Google שלך. מקבל מהטאבלט תמונות, תשריט ונתוני ביקור ושומר אותם בתיקיית התיק.
+ * הסקריפט לא מוחק ולא מעביר לפח שום קובץ: הוא רק קורא קבצים ויוצר חדשים.
  *
  * לפני הפריסה: שנו את KEY למילה סודית משלכם (אותה מילה מוזנת במערכת התיקים).
  */
@@ -13,11 +14,10 @@ function doGet(e) {
   try {
     if (p.action === 'ping') return out({ ok: true });
     if (p.action === 'cases') {
-      // the office system writes a new bruck-cases-*.json each time; use the newest and clear the older ones
+      // the office system writes a new bruck-cases-*.json each time; use the newest one
       const it = DriveApp.getFolderById(PARENT_ID).searchFiles("title contains 'bruck-cases' and trashed = false");
-      let newest = null; const all = [];
-      while (it.hasNext()) { const f = it.next(); all.push(f); if (!newest || f.getDateCreated() > newest.getDateCreated()) newest = f; }
-      all.forEach(function (f) { if (f !== newest) f.setTrashed(true); });
+      let newest = null;
+      while (it.hasNext()) { const f = it.next(); if (!newest || f.getDateCreated() > newest.getDateCreated()) newest = f; }
       return out(newest ? JSON.parse(newest.getBlob().getDataAsString('UTF-8')) : { cases: [] });
     }
     if (p.action === 'files') {
@@ -48,18 +48,17 @@ function doPost(e) {
     if (!folder) return out({ error: 'nofolder' });
     if (b.action === 'upload') {
       const target = b.sub ? sub_(folder, b.sub) : folder;
-      if (b.replace) trashByName_(target, b.name);
-      else if (findFile_(target, b.name)) return out({ ok: true, folderId: folder.getId(), skipped: true });
+      if (findFile_(target, b.name)) return out({ ok: true, folderId: folder.getId(), skipped: true });
       const blob = Utilities.newBlob(Utilities.base64Decode(b.data), b.mime || 'application/octet-stream', b.name);
       const f = target.createFile(blob);
       return out({ ok: true, id: f.getId(), folderId: folder.getId() });
     }
     if (b.action === 'visit') {
+      // each upload is a new version with a time stamp; older versions stay untouched
       const no = b.caseNo ? ' ' + b.caseNo : '';
-      trashByName_(folder, 'ביקור בנכס' + no + '.json');
-      folder.createFile(Utilities.newBlob(b.json, 'application/json', 'ביקור בנכס' + no + '.json'));
-      trashByName_(folder, 'טופס ביקור בנכס' + no + '.pdf');
-      const pdf = Utilities.newBlob(b.html, 'text/html', 'visit.html').getAs('application/pdf').setName('טופס ביקור בנכס' + no + '.pdf');
+      const stamp = Utilities.formatDate(new Date(), 'Asia/Jerusalem', 'yyyy-MM-dd HH.mm');
+      folder.createFile(Utilities.newBlob(b.json, 'application/json', 'ביקור בנכס' + no + ' (' + stamp + ').json'));
+      const pdf = Utilities.newBlob(b.html, 'text/html', 'visit.html').getAs('application/pdf').setName('טופס ביקור בנכס' + no + ' (' + stamp + ').pdf');
       folder.createFile(pdf);
       return out({ ok: true, folderId: folder.getId() });
     }
@@ -84,10 +83,6 @@ function sub_(folder, name) {
 function findFile_(folder, name) {
   const it = folder.getFilesByName(name);
   return it.hasNext() ? it.next() : null;
-}
-function trashByName_(folder, name) {
-  const it = folder.getFilesByName(name);
-  while (it.hasNext()) it.next().setTrashed(true);
 }
 function collect_(folder, files, depth) {
   const it = folder.getFiles();
