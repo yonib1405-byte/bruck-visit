@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.1.0';
+const VERSION='1.2.0';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -150,6 +150,7 @@ async function home(){cur=null;$('#title').textContent='ביקור בנכס';$('
      <label>עורך הביקור (שם קבוע)<input class="t" id="cfgVisitor" value="${esc(cfg.visitor)}"></label>
      <label>כתובת הגשר לדרייב<input class="t" id="cfgBridge" dir="ltr" value="${esc(cfg.bridge)}" placeholder="https://script.google.com/macros/s/…/exec"></label>
      <label>מפתח<input class="t" id="cfgKey" dir="ltr" value="${esc(cfg.key)}"></label></div>
+     <label class="row" style="margin-top:10px;gap:8px"><input type="checkbox" id="cfgPenDiag" ${cfg.penDiag?'checked':''} style="width:22px;height:22px"> הצגת "בדיקת עט" במסך התשריט (לאיתור תקלה בכפתור העט)</label>
      <div class="row" style="margin-top:10px"><button class="btn" type="button" data-act="savecfg">שמירת הגדרות</button><span class="hint">גרסה ${VERSION}</span></div></div>`;
 }
 async function refreshCases(){try{toast('מעדכן מהמשרד…');const j=await bridgeGet({action:'cases'});cases=j.cases||[];
@@ -226,10 +227,10 @@ function layoutHtml(){const L=lay();
 
 /* ---------------- photos ---------------- */
 function photosHtml(){return `<div class="card"><h2>תמונות</h2><div class="row" style="margin-bottom:12px">
-  <button class="btn primary" type="button" data-act="camera">📷 צילום ברצף</button>
-  <label class="btn">מצלמת המכשיר<input type="file" accept="image/*" capture="environment" data-photo hidden></label>
-  <label class="btn">מהגלריה<input type="file" accept="image/*" multiple data-photo hidden></label>
+  <label class="btn primary">🖼 הוספה מהגלריה<input type="file" accept="image/*" multiple data-photo hidden></label>
+  <label class="btn">📷 מצלמה<input type="file" accept="image/*" capture="environment" data-photo hidden></label>
   <span class="hint">${cur.photos.length} תמונות · נשמרות בטאבלט עד ההעלאה</span></div>
+  <div class="hint">הדרך המהירה: מצלמים במצלמה הרגילה של הטאבלט (עם זום 0.5, בלי אישורים), ובסוף לוחצים "הוספה מהגלריה" ומסמנים את כל התמונות של הביקור בבת אחת.</div>
   <div class="photos" id="photoGrid">${cur.photos.map(p=>`<div class="ph" data-ph="${p.k}"><img alt="" data-thumb="${p.k}"><button type="button" data-delph="${p.k}" aria-label="מחיקה">×</button>${p.up?'<span class="up">הועלה</span>':''}</div>`).join('')}</div></div>`}
 let CAM=null;
 async function openCamera(){
@@ -260,8 +261,8 @@ async function shrink(file,max=2400,q=.85){const url=URL.createObjectURL(file);t
   const s=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));if(s===1&&file.size<3e6&&file.type==='image/jpeg')return file;
   const c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*s);c.height=Math.round(img.naturalHeight*s);c.getContext('2d').drawImage(img,0,0,c.width,c.height);
   return await new Promise(r=>c.toBlob(r,'image/jpeg',q))}finally{URL.revokeObjectURL(url)}}
-async function addPhotos(files){let n=cur.photos.length;for(const f of files){const b=await shrink(f);const k='ph:'+uid();await blobPut(k,b);n++;
-  cur.photos.push({k,name:`${cur.caseNo||'ביקור'}_${String(n).padStart(2,'0')}.jpg`,up:false})}touch();await visitPut(cur);renderVisit();fillThumbs();toast(`נוספו ${files.length} תמונות`)}
+async function addPhotos(files,quiet){let n=cur.photos.length;for(const f of files){const b=await shrink(f);const k='ph:'+uid();await blobPut(k,b);n++;
+  cur.photos.push({k,name:`${cur.caseNo||'ביקור'}_${String(n).padStart(2,'0')}.jpg`,up:false})}touch();await visitPut(cur);renderVisit();fillThumbs();toast(quiet?`נשמרה · סה"כ ${cur.photos.length} תמונות`:`נוספו ${files.length} תמונות`,1500)}
 
 /* ---------------- plan (תשריט) ---------------- */
 function planHtml(){const c=cases.find(x=>x.id===cur.caseId);const plans=c?.plans||[];
@@ -293,10 +294,11 @@ function openCrop(blob){return openEditor({mode:'crop',src:blob})}
 async function openEditor(o){
   const img=await blobToImage(o.src);
   const wrap=document.createElement('div');wrap.id='planEd';
-  wrap.innerHTML=`<div class="tb" id="peTb"></div><div class="stage" id="peStage"><canvas id="peCv"></canvas><div class="msg" id="peMsg"></div></div>`;
+  wrap.innerHTML=`<div class="tb" id="peTb"></div><div class="stage" id="peStage"><canvas id="peCv"></canvas><div class="msg" id="peMsg"></div>${cfg.penDiag?'<div id="penDiag" class="pendiag">בדיקת עט: געו במסך עם העט, עם הכפתור ובלעדיו</div>':''}</div>`;
   document.body.appendChild(wrap);
   PE={mode:o.mode,img,items:o.items||[],tool:'pen',color:'#1d4ed8',view:{s:1,x:0,y:0},crop:null,undo:[],cv:$('#peCv'),pointers:new Map(),cur:null};
-  fitView();peToolbar();peDraw();peBind();
+  peToolbar();fitView();peDraw();peBind();
+  try{PE.ro=new ResizeObserver(()=>{if(PE)syncCanvas()});PE.ro.observe($('#peStage'))}catch(_){}
 }
 function blobToImage(b){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(b)})}
 function fitView(){const st=$('#peStage').getBoundingClientRect();const cv=PE.cv;const dpr=devicePixelRatio||1;cv.width=st.width*dpr;cv.height=st.height*dpr;PE.dpr=dpr;
@@ -341,9 +343,11 @@ function peBind(){const st=$('#peStage');
   st.addEventListener('contextmenu',e=>e.preventDefault());
   st.addEventListener('wheel',e=>{e.preventDefault();zoomAt(e.offsetX,e.offsetY,e.deltaY<0?1.12:1/1.12)},{passive:false});
   addEventListener('resize',onPeResize)}
-function onPeResize(){if(!PE)return;const v=PE.view;fitView();peDraw()}
+function onPeResize(){if(PE)syncCanvas()}
+function syncCanvas(){const st=$('#peStage').getBoundingClientRect();const dpr=devicePixelRatio||1;const w=Math.round(st.width*dpr),h=Math.round(st.height*dpr);if(PE.cv.width!==w||PE.cv.height!==h){PE.cv.width=w;PE.cv.height=h;PE.dpr=dpr}peDraw()}
 function zoomAt(x,y,f){const v=PE.view;const ns=Math.max(.05,Math.min(20,v.s*f));const k=ns/v.s;v.x=x-(x-v.x)*k;v.y=y-(y-v.y)*k;v.s=ns;peDraw()}
-function pd(e){const st=$('#peStage');try{st.setPointerCapture(e.pointerId)}catch(_){}const r=st.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;
+function penDiag(e){const d=$('#penDiag');if(d)d.textContent=`${e.type} · ${e.pointerType} · button=${e.button} · buttons=${e.buttons} · pressure=${(e.pressure||0).toFixed(2)}`}
+function pd(e){penDiag(e);const st=$('#peStage');try{st.setPointerCapture(e.pointerId)}catch(_){}const r=st.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;
   if(e.pointerType==='touch'){
     if(PE.penActive)return; // palm resting while writing with the pen
     if(PE.mode==='crop'&&PE.pointers.size===0){PE.pointers.set(e.pointerId,{x,y,crop:true});const w=s2w(x,y);PE.crop={x1:w.x,y1:w.y,x2:w.x,y2:w.y};PE.drag=true;peDraw();return}
@@ -361,7 +365,7 @@ function pd(e){const st=$('#peStage');try{st.setPointerCapture(e.pointerId)}catc
   else if(t==='text'){PE.penActive=false;askText('טקסט על התשריט','').then(v=>{if(v){PE.items.push({t:'text',c,x:w.x,y:w.y,txt:v,fs});peDraw()}})}
   else if(t==='erase'){eraseAt(w,14*px)}
   peDraw()}
-function pm(e){const st=$('#peStage');const r=st.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;
+function pm(e){if(e.pointerType==='pen')penDiag(e);const st=$('#peStage');const r=st.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;
   const ent=PE.pointers.get(e.pointerId);
   if(ent&&!ent.crop){const prev={x:ent.x,y:ent.y};ent.x=x;ent.y=y;
     if(PE.pointers.size===1){PE.view.x+=x-prev.x;PE.view.y+=y-prev.y;peDraw()}
@@ -372,6 +376,7 @@ function pm(e){const st=$('#peStage');const r=st.getBoundingClientRect();const x
   const w=s2w(x,y);
   if(PE.mode==='crop'){if(PE.drag){PE.crop.x2=w.x;PE.crop.y2=w.y;peDraw()}return}
   if(PE.erasing){eraseAt(w,14/PE.view.s);return}
+  if(e.pointerType==='pen'&&PE.mode!=='crop'&&((e.buttons&2)||(e.buttons&32))){PE.cur=null;PE.erasing=true;$('#peMsg').textContent='מחיקה (כפתור העט לחוץ)';eraseAt(w,14/PE.view.s);return}
   if(!PE.cur)return;
   if(PE.cur.t==='pen'||PE.cur.t==='area'){const evs=e.getCoalescedEvents?e.getCoalescedEvents():[e];evs.forEach(ev=>PE.cur.p.push(s2w(ev.clientX-r.left,ev.clientY-r.top)))}
   else if(PE.cur.t==='measure'){PE.cur.x2=w.x;PE.cur.y2=w.y}
@@ -402,22 +407,53 @@ async function finishCrop(c){let blob;
   const k='planbase:'+cur.id;await blobPut(k,blob);cur.plan={base:k,items:[]};touch();await visitPut(cur);
   closeEditor(true);openEditor({mode:'draw',src:blob,items:cur.plan.items})}
 async function savePlan(){cur.plan.items=PE.items;cur.plan.edited=new Date().toISOString();touch();await visitPut(cur);closeEditor();toast('התשריט נשמר');renderVisit();fillPlanThumb()}
-function closeEditor(silent){removeEventListener('resize',onPeResize);$('#planEd')?.remove();PE=null;if(!silent&&cur&&tab==='plan'){renderVisit();fillPlanThumb()}}
+function closeEditor(silent){removeEventListener('resize',onPeResize);try{PE&&PE.ro&&PE.ro.disconnect()}catch(_){}$('#planEd')?.remove();PE=null;if(!silent&&cur&&tab==='plan'){renderVisit();fillPlanThumb()}}
 async function renderPlanBlob(){if(!cur.plan?.base)return null;const b=await blobGet(cur.plan.base);if(!b)return null;const img=await blobToImage(b);
   const cv=document.createElement('canvas');cv.width=img.width;cv.height=img.height;const ctx=cv.getContext('2d');ctx.drawImage(img,0,0);drawItems(ctx,cur.plan.items||[],0);
   return await new Promise(r=>cv.toBlob(r,'image/png'))}
 
 /* ---------------- report + sync ---------------- */
-function reportHtml(v){const sel=(k)=>{const a=v.sel[k]||[];const n=v.notes[k]||{};return a.map(x=>n[x]?`${x} (${n[x]})`:x).join(', ')+(n._?` · ${n._}`:'')};
-  const rows=SECTIONS.filter(s=>s.groups).map(s=>`<h2>${esc(s.title)}</h2><table>${s.groups.map(g=>`<tr><th>${esc(g.l)}</th><td>${esc(sel(g.k))}${(g.extra||[]).map(x=>v.nums[x.k]?` · ${esc(x.l)} ${esc(v.nums[x.k])}`:'').join('')}</td></tr>`).join('')}</table>`).join('');
-  const apt=SECTIONS.find(s=>s.id==='apt');
-  return `<html dir="rtl"><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;font-size:11pt;color:#1f3427}h1{font-size:16pt;margin:0 0 4px}h2{font-size:12pt;border-bottom:1px solid #c99d47;margin:14px 0 6px}table{width:100%;border-collapse:collapse}th{width:32%;text-align:right;background:#eef3f1;padding:4px 6px;border:1px solid #cfdad6;font-weight:600}td{padding:4px 6px;border:1px solid #cfdad6}.m{color:#5b6f66}</style></head><body>
-   <h1>טופס ביקור בנכס ${esc(v.caseNo||'')}</h1><div class="m">${esc([v.head.address,v.head.aptNo?'דירה '+v.head.aptNo:'',v.head.hood,v.head.city].filter(Boolean).join(', '))}</div>
-   <table style="margin-top:8px"><tr><th>תאריך ושעה</th><td>${esc(fmtDate(v.head.date))} ${esc(v.head.time||'')}</td></tr><tr><th>עורך הביקור</th><td>${esc(v.head.visitor||'')}</td></tr><tr><th>מציג הנכס</th><td>${esc(v.head.presenter||'')}</td></tr><tr><th>מחזיק בפועל</th><td>${esc(v.head.occupant||'')}</td></tr></table>
-   ${rows}
-   <h2>${esc(apt.title)}</h2><table>${apt.nums.map(n=>`<tr><th>${esc(n.l)}</th><td>${esc(v.nums[n.k]??'')}</td></tr>`).join('')}<tr><th>קומה אחרונה</th><td>${esc(v.yn.lastFloor||'')}</td></tr><tr><th>חלוקה פנימית</th><td>${esc(v.text.layout||'').replace(/\n/g,'<br>')}</td></tr></table>
-   <h2>חריגות בנייה</h2><p>${esc(v.text.deviations||'—')}</p><h2>הערות</h2><p>${esc(v.text.remarks||'—')}</p>
-   <p class="m">${v.photos.length} תמונות בתיקייה "תמונות"${v.plan?' · תשריט מסומן בתיקיית התיק':''}</p></body></html>`}
+function reportHtml(v,planUrl){const sel=(k)=>{const a=v.sel[k]||[];const n=v.notes[k]||{};return a.map(x=>n[x]?`${x} (${n[x]})`:x).join(', ')+(n._?` · ${n._}`:'')};
+  const cell=(l,x)=>x?`<td class="l">${esc(l)}</td><td class="v">${esc(x)}</td>`:'';
+  const pairs=[];const push=(l,x)=>{if(x!==undefined&&x!==null&&String(x).trim()!=='')pairs.push([l,String(x)])};
+  const sec=(title,list)=>{const p=[];list.forEach(([l,x])=>{if(x!==undefined&&x!==null&&String(x).trim()!=='')p.push([l,String(x)])});if(!p.length)return '';
+    let rows='';for(let i=0;i<p.length;i+=2){rows+=`<tr>${cell(p[i][0],p[i][1])}${p[i+1]?cell(p[i+1][0],p[i+1][1]):'<td class="l"></td><td class="v"></td>'}</tr>`}
+    return `<tr><td colspan="4" class="s">${esc(title)}</td></tr>${rows}`};
+  const g=id=>SECTIONS.find(s=>s.id===id).groups.map(x=>[x.l,sel(x.k)+(x.extra||[]).map(e=>v.nums[e.k]?` · ${e.l} ${v.nums[e.k]}`:'').join('')]);
+  const n=v.nums||{};const rooms=[n.rooms?n.rooms+' חדרים':'',n.halfRooms&&+n.halfRooms?n.halfRooms+' חצאי חדרים':''].filter(Boolean).join(' + ');
+  const aptRows=[['קומה',[n.floor,n.bldFloors?'מתוך '+n.bldFloors:''].filter(Boolean).join(' ')],['דירה מס\'',n.aptNo],['חדרים',rooms],['קומות בדירה',n.aptLevels],['דירות בבניין',n.bldUnits],['דירות בכניסה',n.entryUnits],['דירות בקומה',n.floorUnits],['קומה אחרונה',v.yn?.lastFloor]];
+  const head=[v.head.address,v.head.aptNo?'דירה '+v.head.aptNo:'',v.head.hood,v.head.city].filter(Boolean).join(', ');
+  return `<html dir="rtl"><head><meta charset="utf-8"><style>
+   @page{size:A4;margin:10mm}
+   body{font-family:Arial,sans-serif;font-size:8.6pt;color:#1f3427;margin:0;direction:rtl}
+   .h{border-bottom:2px solid #c99d47;padding-bottom:3px;margin-bottom:4px}
+   .h b{font-size:12.5pt}.h span{color:#5b6f66}
+   table{width:100%;border-collapse:collapse;table-layout:fixed}
+   td{padding:2px 4px;border:1px solid #d6dfdb;vertical-align:top;word-wrap:break-word}
+   td.l{width:15%;background:#eef3f1;font-weight:bold;color:#3b5247}
+   td.v{width:35%}
+   td.s{color:#1f3427;font-weight:bold;font-size:9.2pt;padding:4px 4px 1px;border:0;border-bottom:2px solid #c99d47}
+   .t{white-space:pre-line}
+   .pp{page-break-before:always;text-align:center}
+   .pp h2{font-size:12pt;margin:0 0 6px;text-align:right;border-bottom:2px solid #c99d47}
+   .pp img{max-width:100%;max-height:260mm}
+  </style></head><body>
+   <div class="h"><b>טופס ביקור בנכס ${esc(v.caseNo||'')}</b> &nbsp; <span>${esc(head)}</span></div>
+   <table>
+    ${sec('פרטי הביקור',[['תאריך ושעה',(fmtDate(v.head.date)+' '+(v.head.time||'')).trim()],['עורך הביקור',v.head.visitor],['מציג הנכס',v.head.presenter],['מחזיק בפועל',v.head.occupant]])}
+    ${sec('סביבה',g('env'))}
+    ${sec('בניין',g('bld'))}
+    ${sec('דירה',aptRows)}
+    ${v.text.layout?`<tr><td class="l">חלוקה פנימית</td><td class="v t" colspan="3">${esc(v.text.layout)}</td></tr>`:''}
+    ${sec('גמרים',g('fin'))}
+    ${sec('מטבח וחוץ',g('kit'))}
+    ${v.text.deviations||v.text.remarks?`<tr><td colspan="4" class="s">חריגות והערות</td></tr>${v.text.deviations?`<tr><td class="l">חריגות בנייה</td><td class="v t" colspan="3">${esc(v.text.deviations)}</td></tr>`:''}${v.text.remarks?`<tr><td class="l">הערות</td><td class="v t" colspan="3">${esc(v.text.remarks)}</td></tr>`:''}`:''}
+   </table>
+   <div style="color:#5b6f66;margin-top:3px">${v.photos.length} תמונות בתיקייה "תמונות"${planUrl?' · התשריט המסומן בעמוד הבא':''}</div>
+   ${planUrl?`<div class="pp"><h2>תשריט עם סימוני הביקור ${esc(v.caseNo||'')}</h2><img src="${planUrl}"></div>`:''}
+  </body></html>`}
+async function planJpegDataUrl(){const b=await renderPlanBlob();if(!b)return '';const img=await blobToImage(b);const s=Math.min(1,2200/Math.max(img.width,img.height));
+  const c=document.createElement('canvas');c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.85)}
 function visitData(v){const out={layout:v.layout||null,caseNo:v.caseNo,caseId:v.caseId,head:v.head,nums:v.nums,yn:v.yn,text:v.text,sel:v.sel,notes:v.notes,
   labels:Object.fromEntries(SECTIONS.flatMap(s=>(s.groups||[]).map(g=>[g.k,g.l]))),photos:v.photos.map(p=>p.name),hasPlan:!!v.plan,app:VERSION,updated:v.updated};return out}
 async function syncVisit(){if(!navigator.onLine){toast('אין חיבור לאינטרנט. הכול שמור בטאבלט, אפשר להעלות כשיהיה WiFi.');return}
@@ -426,8 +462,8 @@ async function syncVisit(){if(!navigator.onLine){toast('אין חיבור לאי
   try{let i=0;const total=cur.photos.filter(p=>!p.up).length;
     for(const p of cur.photos){if(p.up)continue;i++;set(`מעלה תמונה ${i}/${total}…`);const b=await blobGet(p.k);if(!b){p.up=true;continue}
       const r=await bridgePost({action:'upload',folderId:cur.folderId,caseNo:cur.caseNo,sub:'תמונות',name:p.name,mime:'image/jpeg',data:await blobToB64(b)});if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;p.up=true;await visitPut(cur)}
-    if(cur.plan?.base){set('מעלה תשריט…');const b=await renderPlanBlob();const r=await bridgePost({action:'upload',folderId:cur.folderId,caseNo:cur.caseNo,sub:'',name:`תשריט מסומן ${cur.caseNo||''} (${new Date().toLocaleString('sv').slice(0,16).replace(':','.')}).png`,mime:'image/png',data:await blobToB64(b)});if(r.folderId&&!cur.folderId)cur.folderId=r.folderId}
-    set('מעלה טופס…');const r=await bridgePost({action:'visit',folderId:cur.folderId,caseNo:cur.caseNo,json:JSON.stringify(visitData(cur)),html:reportHtml(cur)});if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;
+    set('מעלה טופס…');const planUrl=cur.plan?.base?await planJpegDataUrl():'';
+    const r=await bridgePost({action:'visit',folderId:cur.folderId,caseNo:cur.caseNo,json:JSON.stringify(visitData(cur)),html:reportHtml(cur,planUrl)});if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;
     cur.synced=new Date().toISOString();cur.dirtyAfterSync=false;await visitPut(cur);toast('הביקור הועלה לתיקיית התיק בדרייב ✓',3500)}
   catch(e){toast(['dev','notjson'].includes(e.message)?errText(e):e.message==='key'?'המפתח שגוי. בדקו את ההגדרות.':e.message==='nofolder'?'לא נמצאה תיקיית התיק בדרייב. בדקו את מספר התיק.':'ההעלאה נעצרה. מה שהועלה נשמר, ואפשר ללחוץ שוב כדי להמשיך.',4500);await visitPut(cur)}
   renderVisit();if(tab==='photos')fillThumbs();if(tab==='plan')fillPlanThumb()}
@@ -440,7 +476,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
   const a=b.dataset.act;
   if(a==='refresh')return refreshCases();
   if(a==='manual'){const v=newVisit(null);await visitPut(v);cur=v;tab='head';return renderVisit()}
-  if(a==='savecfg'){cfg.visitor=$('#cfgVisitor').value.trim();cfg.bridge=$('#cfgBridge').value.trim();cfg.key=$('#cfgKey').value.trim();await kvSet('cfg',cfg);toast('ההגדרות נשמרו');return home()}
+  if(a==='savecfg'){cfg.visitor=$('#cfgVisitor').value.trim();cfg.bridge=$('#cfgBridge').value.trim();cfg.key=$('#cfgKey').value.trim();cfg.penDiag=$('#cfgPenDiag').checked;await kvSet('cfg',cfg);toast('ההגדרות נשמרו');return home()}
   if(!cur)return;
   if(b.dataset.tab){await visitPut(cur);tab=b.dataset.tab;renderVisit();if(tab==='photos')fillThumbs();if(tab==='plan')fillPlanThumb();return}
   if(b.dataset.g){const g=SECTIONS.flatMap(s=>s.groups||[]).find(x=>x.k===b.dataset.g);const v=b.dataset.v;let a2=cur.sel[g.k]||[];const multi=isMulti(g);
@@ -476,7 +512,7 @@ document.addEventListener('input',e=>{if(!cur)return;const t=e.target;
   if(t.dataset.text){cur.text[t.dataset.text]=t.value;if(t.dataset.text==='layoutNote')syncLayoutText();touch();return}});
 document.addEventListener('change',async e=>{const t=e.target;
   if(t.dataset.floorname!==undefined&&cur){lay()[+t.dataset.floorname].floor=t.value;syncLayoutText();touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
-  if(t.dataset.photo!==undefined&&t.files?.length){await addPhotos([...t.files]);t.value='';return}
+  if(t.dataset.photo!==undefined&&t.files?.length){const again=t.dataset.again!==undefined;await addPhotos([...t.files],again);t.value='';if(again){const n=document.querySelector('input[data-again]');if(n)try{n.click()}catch(_){}}return}
   if(t.dataset.planfile!==undefined&&t.files?.[0]){const f=t.files[0];t.value='';try{await loadPlanSource(f)}catch(_){toast('לא הצלחתי לפתוח את הקובץ')}}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&cur)visitPut(cur)});
 
