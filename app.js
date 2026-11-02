@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.2.0';
+const VERSION='1.2.1';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -339,16 +339,21 @@ function peBind(){const st=$('#peStage');
     const a=b.dataset.pe;if(a==='close'){closeEditor();return}if(a==='undo'){PE.items.pop();peDraw();return}
     if(a==='skipcrop'){finishCrop(null);return}if(a==='docrop'){if(!PE.crop||Math.abs(PE.crop.x2-PE.crop.x1)<20){toast('גוררים קודם מלבן סביב הדירה');return}finishCrop(PE.crop);return}
     if(a==='save'){savePlan();return}});
-  st.addEventListener('pointerdown',pd);st.addEventListener('pointermove',pm);st.addEventListener('pointerup',pu);st.addEventListener('pointercancel',pu);
+  st.addEventListener('pointerover',e=>{if(e.pointerType==='pen'){const r=st.getBoundingClientRect();PE.hover={x:e.clientX-r.left,y:e.clientY-r.top,t:performance.now()}}});st.addEventListener('pointerdown',pd);st.addEventListener('pointermove',pm);st.addEventListener('pointerup',pu);st.addEventListener('pointercancel',pu);
   st.addEventListener('contextmenu',e=>e.preventDefault());
   st.addEventListener('wheel',e=>{e.preventDefault();zoomAt(e.offsetX,e.offsetY,e.deltaY<0?1.12:1/1.12)},{passive:false});
   addEventListener('resize',onPeResize)}
 function onPeResize(){if(PE)syncCanvas()}
 function syncCanvas(){const st=$('#peStage').getBoundingClientRect();const dpr=devicePixelRatio||1;const w=Math.round(st.width*dpr),h=Math.round(st.height*dpr);if(PE.cv.width!==w||PE.cv.height!==h){PE.cv.width=w;PE.cv.height=h;PE.dpr=dpr}peDraw()}
 function zoomAt(x,y,f){const v=PE.view;const ns=Math.max(.05,Math.min(20,v.s*f));const k=ns/v.s;v.x=x-(x-v.x)*k;v.y=y-(y-v.y)*k;v.s=ns;peDraw()}
-function penDiag(e){const d=$('#penDiag');if(d)d.textContent=`${e.type} · ${e.pointerType} · button=${e.button} · buttons=${e.buttons} · pressure=${(e.pressure||0).toFixed(2)}`}
+const DLOG=[];
+function penDiag(e){const d=$('#penDiag');if(!d)return;const h=PE&&PE.hover?Math.round(performance.now()-PE.hover.t)+'ms':'-';
+  DLOG.unshift(`${e.type.replace('pointer','')} ${e.pointerType} b=${e.button} bs=${e.buttons} p=${(e.pressure||0).toFixed(2)} w=${Math.round(e.width||0)} h=${Math.round(e.height||0)} hover=${h}`);DLOG.length=Math.min(DLOG.length,6);d.textContent=DLOG.join('\n')}
+// The Samsung pen with its side button held may arrive as a "touch". It is still the pen when the pen was hovering at the same spot a moment ago, or when the contact is pen-sized.
+function penAsTouch(e,x,y){const h=PE.hover;if(h&&performance.now()-h.t<700&&Math.hypot(h.x-x,h.y-y)<70)return true;return (e.width>0&&e.width<=3&&e.height>0&&e.height<=3)}
 function pd(e){penDiag(e);const st=$('#peStage');try{st.setPointerCapture(e.pointerId)}catch(_){}const r=st.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;
   if(e.pointerType==='touch'){
+    if(PE.mode!=='crop'&&!PE.penActive&&penAsTouch(e,x,y)){PE.erasing=true;PE.erasePtr=e.pointerId;$('#peMsg').textContent='מחיקה (כפתור העט לחוץ)';eraseAt(s2w(x,y),14/PE.view.s);return}
     if(PE.penActive)return; // palm resting while writing with the pen
     if(PE.mode==='crop'&&PE.pointers.size===0){PE.pointers.set(e.pointerId,{x,y,crop:true});const w=s2w(x,y);PE.crop={x1:w.x,y1:w.y,x2:w.x,y2:w.y};PE.drag=true;peDraw();return}
     for(const [k,v] of PE.pointers){if(v.crop){v.crop=false;PE.drag=false;PE.crop=PE.prevCrop||null}}
@@ -365,7 +370,9 @@ function pd(e){penDiag(e);const st=$('#peStage');try{st.setPointerCapture(e.poin
   else if(t==='text'){PE.penActive=false;askText('טקסט על התשריט','').then(v=>{if(v){PE.items.push({t:'text',c,x:w.x,y:w.y,txt:v,fs});peDraw()}})}
   else if(t==='erase'){eraseAt(w,14*px)}
   peDraw()}
-function pm(e){if(e.pointerType==='pen')penDiag(e);const st=$('#peStage');const r=st.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;
+function pm(e){penDiag(e);const st=$('#peStage');const r=st.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;
+  if(e.pointerType==='pen'&&!e.buttons)PE.hover={x,y,t:performance.now()};
+  if(PE.erasePtr===e.pointerId){eraseAt(s2w(x,y),14/PE.view.s);return}
   const ent=PE.pointers.get(e.pointerId);
   if(ent&&!ent.crop){const prev={x:ent.x,y:ent.y};ent.x=x;ent.y=y;
     if(PE.pointers.size===1){PE.view.x+=x-prev.x;PE.view.y+=y-prev.y;peDraw()}
@@ -381,7 +388,8 @@ function pm(e){if(e.pointerType==='pen')penDiag(e);const st=$('#peStage');const 
   if(PE.cur.t==='pen'||PE.cur.t==='area'){const evs=e.getCoalescedEvents?e.getCoalescedEvents():[e];evs.forEach(ev=>PE.cur.p.push(s2w(ev.clientX-r.left,ev.clientY-r.top)))}
   else if(PE.cur.t==='measure'){PE.cur.x2=w.x;PE.cur.y2=w.y}
   peDraw()}
-async function pu(e){const ent=PE.pointers.get(e.pointerId);PE.pointers.delete(e.pointerId);
+async function pu(e){penDiag(e);if(PE.erasePtr===e.pointerId){PE.erasePtr=null;PE.erasing=false;peToolbar();return}
+  const ent=PE.pointers.get(e.pointerId);PE.pointers.delete(e.pointerId);
   if(ent&&!ent.crop)return;
   if(e.pointerType==='touch'&&!ent)return;
   if(e.pointerType==='pen')PE.penActive=false;
