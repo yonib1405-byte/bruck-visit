@@ -92,6 +92,28 @@ textarea.t{min-height:110px;resize:vertical}
 .pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;max-height:60vh;overflow:auto}
 .pages button{border:1px solid var(--line);background:var(--sunk);border-radius:8px;padding:6px}
 .pages img{width:100%;display:block}
+.floor{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--sunk)}
+.items{display:flex;flex-wrap:wrap;gap:8px}
+.item{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--surface);border:1.5px solid var(--band);border-radius:12px;padding:6px 8px 6px 10px}
+.item.on{border-color:var(--gold);box-shadow:0 0 0 3px rgba(201,157,71,.35)}
+.item .sub{display:inline-flex;align-items:center;gap:2px;background:var(--sunk);border-radius:8px;padding:2px 6px;font-size:.9rem}
+.item button{border:0;background:none;font-size:1rem;padding:4px 6px;color:var(--muted)}
+.item .incl{color:var(--gold-2);font-weight:700;font-size:.85rem}
+.chip.sp{padding:8px 12px;min-height:44px}
+.preview{white-space:pre-line;background:var(--surface);border:1px dashed var(--gold);border-radius:10px;padding:10px 12px;font-weight:600}
+#cam{position:fixed;inset:0;z-index:80;background:#000;display:flex;flex-direction:column}
+#cam video{flex:1;width:100%;height:100%;object-fit:contain;background:#000}
+#cam .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+#cam .flash.go{animation:fl .25s ease-out}
+@keyframes fl{0%{opacity:.7}100%{opacity:0}}
+.cam-bar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-around;padding:18px 18px calc(18px + env(safe-area-inset-bottom,0px));background:linear-gradient(transparent,rgba(0,0,0,.6))}
+.shutter{width:84px;height:84px;border-radius:50%;border:6px solid #fff;background:rgba(255,255,255,.25)}
+.shutter:active{background:#fff}
+.cam-done{background:var(--gold);color:var(--band);border:0;border-radius:999px;padding:12px 22px;font-weight:700;font-size:1.05rem}
+.cam-last{position:relative;width:64px;height:64px;border-radius:10px;overflow:hidden;border:2px solid #fff;background:#222}
+.cam-last img{width:100%;height:100%;object-fit:cover}
+.cam-n{position:absolute;top:2px;left:2px;background:var(--gold);color:var(--band);border-radius:999px;padding:0 7px;font-weight:700;font-size:.8rem}
+@media (orientation:landscape){.cam-bar{top:0;left:auto;width:130px;flex-direction:column;background:linear-gradient(to left,rgba(0,0,0,.6),transparent)}}
 .planthumb{max-width:100%;border:1px solid var(--line);border-radius:10px;background:#fff}
 </style>
 </head>

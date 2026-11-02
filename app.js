@@ -1,13 +1,13 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.0.2';
+const VERSION='1.1.0';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
  {id:'env',title:'סביבה',groups:[
-  {k:'street',l:'רחוב',o:['חד סטרי','דו סטרי','ללא מוצא','ש. גישה']},
-  {k:'streetDir',l:'כיוון הרחוב',o:['צפון','דרום','מזרח','מערב']},
+  {k:'street',l:'רחוב',o:['חד סטרי','דו סטרי','מעגלי','ללא מוצא','ש. גישה']},
+  {k:'streetDir',l:'כיוון הרחוב',o:['צפון','דרום','מזרח','מערב'],mIf:{k:'street',v:['דו סטרי','מעגלי']}},
   {k:'areaBuild',l:'אופי הבנייה בסביבה',o:['צמודי קרקע','רוויה','מסחר/משרדים','תעשיה/אחסנה'],m:1},
   {k:'hood',l:'אופי השכונה',o:['שקטה','רועשת','מרכזית','צדדית'],m:1},
   {k:'hoodAge',l:'גיל השכונה',o:['ותיקה','חדשה','בבנייה']},
@@ -31,9 +31,9 @@ const SECTIONS=[
  {id:'apt',title:'דירה',nums:[
   {k:'bldFloors',l:'מס\' קומות בבניין'},{k:'bldUnits',l:'מס\' דירות בכל הבניין'},{k:'entryUnits',l:'מס\' דירות בכניסה'},
   {k:'floorUnits',l:'מס\' דירות בקומה'},{k:'floor',l:'הנכס בקומה'},{k:'aptNo',l:'דירה מס\'',t:1},
-  {k:'rooms',l:'מס\' חדרים',step:.5},{k:'aptLevels',l:'מס\' קומות בדירה'}],
+  {k:'rooms',l:'חדרים מלאים'},{k:'halfRooms',l:'חצאי חדרים'},{k:'aptLevels',l:'מס\' קומות בדירה'}],
   yn:[{k:'lastFloor',l:'קומה אחרונה'}],
-  text:[{k:'layout',l:'חלוקת הדירה',ph:'לדוגמה: מבואה, סלון, מטבח, פינת אוכל, 3 חדרים (אחד ממ"ד), 2 חדרי רחצה, מרפסת שמש',quick:['מבואה','סלון','מטבח','פינת אוכל','חדר שינה הורים','חדר','ממ"ד','חדר רחצה','שירותי אורחים','חדר כביסה','מרפסת שמש','מרפסת שירות','מחסן','גלריה']}]
+  layout:1
  },
  {id:'fin',title:'גמרים',groups:[
   {k:'loc',l:'מיקום',o:['חזית','עורף','צד','פנימי','לרחוב'],m:1},
@@ -166,7 +166,8 @@ function errText(e){const m=e&&e.message;return m==='key'?'המפתח שגוי. 
 /* ---------------- visit editor ---------------- */
 async function openVisit(id){cur=await visitGet(id);if(!cur)return home();tab='head';renderVisit()}
 async function startVisit(caseId){const c=cases.find(x=>x.id===caseId);const ex=await visitGet(caseId);cur=ex||newVisit(c);if(!ex)await visitPut(cur);tab='head';renderVisit()}
-function chipGroup(g){const vals=cur.sel[g.k]||[];const notes=cur.notes[g.k]||{};
+const isMulti=g=>!!g.m||!!(g.mIf&&(cur.sel[g.mIf.k]||[]).some(x=>g.mIf.v.includes(x)));
+function chipGroup(g0){const g={...g0,m:isMulti(g0)};const vals=cur.sel[g.k]||[];const notes=cur.notes[g.k]||{};
   return `<div class="grp"><div class="lbl">${esc(g.l)}${g.m?'<small>אפשר לבחור כמה</small>':''}</div>
    <div class="chips">${g.o.map(o=>`<button type="button" class="chip" data-g="${g.k}" data-v="${esc(o)}" aria-pressed="${vals.includes(o)}">${esc(o)}</button>`).join('')}</div>
    ${g.m&&vals.length>1?`<div class="notes">${vals.map(v=>`<div class="note"><span>${esc(v)}:</span><input class="t" data-note="${g.k}" data-v="${esc(v)}" value="${esc(notes[v]||'')}" placeholder="איפה? למשל: סלון / חדרים / קומה עליונה"></div>`).join('')}</div>`:''}
@@ -181,6 +182,7 @@ function renderVisit(){$('#backBtn').classList.remove('hidden');$('#title').text
   else if(sec.id==='photos'){body=photosHtml()}
   else if(sec.id==='plan'){body=planHtml()}
   else{body=`<div class="card"><h2>${esc(sec.title)}</h2>${(sec.nums||[]).map(numField).join('')}${(sec.yn||[]).map(y=>`<div class="grp"><div class="lbl">${esc(y.l)}</div><div class="chips">${['כן','לא'].map(o=>`<button type="button" class="chip" data-yn="${y.k}" data-v="${o}" aria-pressed="${cur.yn[y.k]===o}">${o}</button>`).join('')}</div></div>`).join('')}
+    ${sec.layout?layoutHtml():''}
     ${(sec.groups||[]).map(chipGroup).join('')}
     ${(sec.text||[]).map(t=>`<div class="grp"><div class="lbl">${esc(t.l)}</div>${t.quick?`<div class="chips" style="margin-bottom:8px">${t.quick.map(q=>`<button type="button" class="chip" data-quick="${t.k}" data-v="${esc(q)}" aria-pressed="false">+ ${esc(q)}</button>`).join('')}</div>`:''}<textarea class="t" data-text="${t.k}" placeholder="${esc(t.ph||'')}">${esc(cur.text[t.k]||'')}</textarea></div>`).join('')}</div>`}
   const idx=TAB_ORDER.indexOf(tab);
@@ -191,12 +193,68 @@ function renderVisit(){$('#backBtn').classList.remove('hidden');$('#title').text
   window.scrollTo(0,0)}
 function filledCount(s){if(!s.groups)return s.id==='photos'?cur.photos.length:0;return s.groups.filter(g=>(cur.sel[g.k]||[]).length).length}
 
+/* ---------------- internal layout (חלוקה פנימית) ---------------- */
+const SPACES=['מבואה','חדר מגורים','מטבח','פינת אוכל','פינת משפחה','יחידת הורים','חדר שינה','ממ"ד','חדר רחצה','תא שירותים','חדר ארונות','חדר כביסה','מרפסת שירות','מרפסת שמש','מרפסת','חצר','מחסן','חלל','חדר עבודה','גלריה','מעבר'];
+const PLURAL={'חדר שינה':'חדרי שינה','חדר רחצה':'חדרי רחצה','תא שירותים':'תאי שירותים','מרפסת שמש':'מרפסות שמש','מרפסת':'מרפסות','מחסן':'מחסנים','חדר עבודה':'חדרי עבודה','חדר ארונות':'חדרי ארונות','מרפסת שירות':'מרפסות שירות','חלל':'חללים','ממ"ד':'ממ"דים','חצר':'חצרות','מעבר':'מעברים'};
+const FLOORS=['קומת מרתף','קומת קרקע','קומה א\'','קומה ב\'','קומה ג\'','קומת גלריה','קומת גג'];
+let addTo=null; // {f, i} when choosing a sub-space ("כולל") for an item
+function lay(){if(!cur.layout)cur.layout=[{floor:'',items:[],mamadRoom:false}];return cur.layout}
+const vav=w=>'ו'+w;
+function joinHe(arr){if(arr.length<2)return arr.join('');return arr.slice(0,-1).join(', ')+' '+vav(arr[arr.length-1])}
+function floorText(fl){const groups=[];const seen={};
+  fl.items.forEach(it=>{const subs=it.subs||[];if(!subs.length){if(seen[it.n]!==undefined){groups[seen[it.n]].c++;return}seen[it.n]=groups.length;groups.push({n:it.n,c:1})}else groups.push({n:it.n,c:1,subs})});
+  const parts=groups.map(g=>{let t=g.c>1?`${g.c} ${PLURAL[g.n]||g.n}`:g.n;
+    if(g.n==='חדר שינה'&&fl.mamadRoom)t+=g.c>1?' (אחד מהם ממ"ד)':' (משמש כממ"ד)';
+    if(g.subs)t+=' עם '+joinHe(g.subs);return t});
+  return joinHe(parts)}
+function layoutText(){const L=lay();const multi=L.length>1||L.some(f=>f.floor);
+  return L.filter(f=>f.items.length).map(f=>(multi&&f.floor?f.floor+' - ':'')+floorText(f)).join('\n')}
+function syncLayoutText(){cur.text.layout=layoutText()+(cur.text.layoutNote?((layoutText()?'\n':'')+cur.text.layoutNote):'')}
+function layoutHtml(){const L=lay();
+  return `<div class="grp"><div class="lbl">חלוקה פנימית <small>לוחצים על החללים לפי הסדר · "+ כולל" מוסיף חלק לאותו חלל (למשל מטבח עם מרפסת שירות)</small></div>
+   ${L.map((fl,f)=>`<div class="floor">
+     <div class="row" style="gap:8px;margin-bottom:8px">${L.length>1||fl.floor?`<select class="t" data-floorname="${f}" style="width:auto;min-width:160px"><option value="">בחירת קומה…</option>${FLOORS.map(x=>`<option ${x===fl.floor?'selected':''}>${esc(x)}</option>`).join('')}${fl.floor&&!FLOORS.includes(fl.floor)?`<option selected>${esc(fl.floor)}</option>`:''}</select>`:''}
+       ${L.length>1?`<button class="btn danger" type="button" data-delfloor="${f}" style="min-height:40px;padding:6px 12px">הסרת הקומה</button>`:''}</div>
+     <div class="items">${fl.items.map((it,i)=>`<span class="item${addTo&&addTo.f===f&&addTo.i===i?' on':''}"><b>${esc(it.n)}</b>${(it.subs||[]).map((sb,j)=>`<span class="sub">+ ${esc(sb)}<button type="button" data-delsub="${f}:${i}:${j}" aria-label="הסרה">×</button></span>`).join('')}<button type="button" class="incl" data-incl="${f}:${i}">+ כולל</button><button type="button" class="x" data-delitem="${f}:${i}" aria-label="הסרה">×</button></span>`).join('')||'<span class="hint">עוד לא נבחרו חללים בקומה הזו.</span>'}</div>
+     ${addTo&&addTo.f===f?`<div class="hint" style="margin:8px 0 4px;color:var(--warn);font-weight:700">בחרו מה כלול ב"${esc(fl.items[addTo.i]?.n||'')}" <button type="button" class="btn" data-incldone style="min-height:36px;padding:4px 12px">סיום</button></div>`:''}
+     <div class="chips" style="margin-top:8px">${SPACES.map(x=>`<button type="button" class="chip sp" data-space="${f}" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+     ${fl.items.some(it=>it.n==='חדר שינה')?`<div class="chips" style="margin-top:8px"><button type="button" class="chip" data-mamadroom="${f}" aria-pressed="${!!fl.mamadRoom}">אחד מחדרי השינה הוא ממ"ד</button></div>`:''}
+   </div>`).join('')}
+   <div class="row" style="margin:6px 0 10px"><button class="btn" type="button" data-addfloor>+ הוספת קומה</button><span class="hint">לדופלקס, לצמוד קרקע או לדירה עם מרתף</span></div>
+   <div class="preview">${esc(layoutText())||'<span class="hint">כאן יופיע התיאור, למשל: חדר מגורים, מטבח עם מרפסת שירות, 3 חדרי שינה וחדר רחצה</span>'}</div>
+   <textarea class="t" data-text="layoutNote" placeholder="תוספת חופשית לחלוקה (לא חובה)" style="min-height:70px;margin-top:8px">${esc(cur.text.layoutNote||'')}</textarea></div>`}
+
 /* ---------------- photos ---------------- */
 function photosHtml(){return `<div class="card"><h2>תמונות</h2><div class="row" style="margin-bottom:12px">
-  <label class="btn primary">📷 צילום<input type="file" accept="image/*" capture="environment" data-photo hidden></label>
+  <button class="btn primary" type="button" data-act="camera">📷 צילום ברצף</button>
+  <label class="btn">מצלמת המכשיר<input type="file" accept="image/*" capture="environment" data-photo hidden></label>
   <label class="btn">מהגלריה<input type="file" accept="image/*" multiple data-photo hidden></label>
   <span class="hint">${cur.photos.length} תמונות · נשמרות בטאבלט עד ההעלאה</span></div>
   <div class="photos" id="photoGrid">${cur.photos.map(p=>`<div class="ph" data-ph="${p.k}"><img alt="" data-thumb="${p.k}"><button type="button" data-delph="${p.k}" aria-label="מחיקה">×</button>${p.up?'<span class="up">הועלה</span>':''}</div>`).join('')}</div></div>`}
+let CAM=null;
+async function openCamera(){
+  let stream;
+  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:4032},height:{ideal:3024}},audio:false})}
+  catch(e){toast('אין גישה למצלמה. אפשר לאשר גישה בהגדרות הדפדפן, או להשתמש ב"מצלמת המכשיר".',5000);return}
+  const el=document.createElement('div');el.id='cam';
+  el.innerHTML=`<video playsinline autoplay muted></video><div class="flash"></div>
+   <div class="cam-bar"><button type="button" class="cam-done" data-cam="done">סיום</button><button type="button" class="shutter" data-cam="shot" aria-label="צילום"></button><div class="cam-last"><img alt=""><span class="cam-n">0</span></div></div>`;
+  document.body.appendChild(el);const v=el.querySelector('video');v.srcObject=stream;
+  const track=stream.getVideoTracks()[0];let ic=null;try{if('ImageCapture' in window)ic=new ImageCapture(track)}catch(_){}
+  CAM={el,stream,v,ic,n:0,busy:0};
+  el.addEventListener('click',e=>{const b=e.target.closest('[data-cam]');if(!b)return;if(b.dataset.cam==='shot')camShot();else closeCamera()});
+}
+async function camShot(){const C=CAM;if(!C)return;const f=C.el.querySelector('.flash');f.classList.remove('go');void f.offsetWidth;f.classList.add('go');
+  C.n++;C.el.querySelector('.cam-n').textContent=C.n;C.busy++;
+  try{let blob=null;
+    if(C.ic){try{blob=await C.ic.takePhoto()}catch(_){blob=null}}
+    if(!blob){const c=document.createElement('canvas');c.width=C.v.videoWidth;c.height=C.v.videoHeight;c.getContext('2d').drawImage(C.v,0,0);blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.9))}
+    const b=await shrink(blob);const k='ph:'+uid();await blobPut(k,b);const n=cur.photos.length+1;
+    cur.photos.push({k,name:`${cur.caseNo||'ביקור'}_${String(n).padStart(2,'0')}.jpg`,up:false});touch();await visitPut(cur);
+    const im=C.el.querySelector('.cam-last img');if(im){if(im.src)URL.revokeObjectURL(im.src);im.src=URL.createObjectURL(b)}
+  }catch(_){toast('תמונה אחת לא נשמרה')}finally{C.busy--}}
+async function closeCamera(){const C=CAM;if(!C)return;let w=0;while(C.busy>0&&w<40){await new Promise(r=>setTimeout(r,100));w++}
+  C.stream.getTracks().forEach(t=>t.stop());C.el.remove();CAM=null;if(C.n)toast(`נשמרו ${C.n} תמונות`);renderVisit();fillThumbs()}
 async function fillThumbs(){for(const img of document.querySelectorAll('[data-thumb]')){const b=await blobGet(img.dataset.thumb);if(b){img.src=URL.createObjectURL(b)}}}
 async function shrink(file,max=2400,q=.85){const url=URL.createObjectURL(file);try{const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url});
   const s=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));if(s===1&&file.size<3e6&&file.type==='image/jpeg')return file;
@@ -249,7 +307,7 @@ function peToolbar(){const tb=$('#peTb');
   tb.innerHTML=T.map(([k,l])=>`<button type="button" data-tool="${k}" aria-pressed="${PE.tool===k}">${l}</button>`).join('')+
    `<button type="button" data-color="#1d4ed8" aria-pressed="${PE.color==='#1d4ed8'}" style="color:#7aa2ff">● כחול</button><button type="button" data-color="#dc2626" aria-pressed="${PE.color==='#dc2626'}" style="color:#ff8a8a">● אדום</button>
    <button type="button" data-pe="undo">↶ ביטול</button><span class="sp"></span><button type="button" data-pe="save">שמירה וסגירה</button><button type="button" data-pe="close">יציאה</button>`;
-  const tips={pen:'כותבים ומסמנים בעט · אצבעות: הזזה והגדלה',check:'נגיעה בעט מוסיפה ✓ ליד מידה תואמת',measure:'מותחים קו בעט, ואז מקלידים את המידה שנמדדה',area:'מקיפים בעט את אזור החריגה, ואז כותבים הערה',text:'נגיעה בעט ואז מקלידים טקסט',erase:'נגיעה על סימון מוחקת אותו'};
+  const tips={pen:'כותבים ומסמנים בעט · כפתור העט לחוץ = מחיקה · אצבעות: הזזה והגדלה',check:'נגיעה בעט מוסיפה ✓ ליד מידה תואמת',measure:'מותחים קו בעט, ואז מקלידים את המידה שנמדדה',area:'מקיפים בעט את אזור החריגה, ואז כותבים הערה',text:'נגיעה בעט ואז מקלידים טקסט',erase:'נגיעה על סימון מוחקת אותו'};
   $('#peMsg').textContent=tips[PE.tool]}
 function w2s(p){return {x:p.x*PE.view.s+PE.view.x,y:p.y*PE.view.s+PE.view.y}}
 function s2w(x,y){return {x:(x-PE.view.x)/PE.view.s,y:(y-PE.view.y)/PE.view.s}}
@@ -280,6 +338,7 @@ function peBind(){const st=$('#peStage');
     if(a==='skipcrop'){finishCrop(null);return}if(a==='docrop'){if(!PE.crop||Math.abs(PE.crop.x2-PE.crop.x1)<20){toast('גוררים קודם מלבן סביב הדירה');return}finishCrop(PE.crop);return}
     if(a==='save'){savePlan();return}});
   st.addEventListener('pointerdown',pd);st.addEventListener('pointermove',pm);st.addEventListener('pointerup',pu);st.addEventListener('pointercancel',pu);
+  st.addEventListener('contextmenu',e=>e.preventDefault());
   st.addEventListener('wheel',e=>{e.preventDefault();zoomAt(e.offsetX,e.offsetY,e.deltaY<0?1.12:1/1.12)},{passive:false});
   addEventListener('resize',onPeResize)}
 function onPeResize(){if(!PE)return;const v=PE.view;fitView();peDraw()}
@@ -292,6 +351,7 @@ function pd(e){const st=$('#peStage');try{st.setPointerCapture(e.pointerId)}catc
     PE.pointers.set(e.pointerId,{x,y});return}
   PE.penActive=e.pointerType==='pen';
   const w=s2w(x,y);const px=1/PE.view.s;
+  if(PE.mode!=='crop'&&e.pointerType==='pen'&&((e.buttons&2)||(e.buttons&32)||e.button===2||e.button===5)){PE.erasing=true;$('#peMsg').textContent='מחיקה (כפתור העט לחוץ)';eraseAt(w,14*px);return}
   if(PE.mode==='crop'){PE.prevCrop=PE.crop;PE.crop={x1:w.x,y1:w.y,x2:w.x,y2:w.y};PE.drag=true;peDraw();return}
   const t=PE.tool,c=PE.color,lw=Math.max(2,2.2*px*(e.pressure?(.6+e.pressure):1)),fs=Math.max(14,22*px);
   if(t==='pen')PE.cur={t:'pen',c,lw,p:[w]};
@@ -311,6 +371,7 @@ function pm(e){const st=$('#peStage');const r=st.getBoundingClientRect();const x
   if(e.pointerType==='touch'&&!ent)return;
   const w=s2w(x,y);
   if(PE.mode==='crop'){if(PE.drag){PE.crop.x2=w.x;PE.crop.y2=w.y;peDraw()}return}
+  if(PE.erasing){eraseAt(w,14/PE.view.s);return}
   if(!PE.cur)return;
   if(PE.cur.t==='pen'||PE.cur.t==='area'){const evs=e.getCoalescedEvents?e.getCoalescedEvents():[e];evs.forEach(ev=>PE.cur.p.push(s2w(ev.clientX-r.left,ev.clientY-r.top)))}
   else if(PE.cur.t==='measure'){PE.cur.x2=w.x;PE.cur.y2=w.y}
@@ -319,6 +380,7 @@ async function pu(e){const ent=PE.pointers.get(e.pointerId);PE.pointers.delete(e
   if(ent&&!ent.crop)return;
   if(e.pointerType==='touch'&&!ent)return;
   if(e.pointerType==='pen')PE.penActive=false;
+  if(PE.erasing){PE.erasing=false;peToolbar();return}
   if(PE.mode==='crop'){PE.drag=false;return}
   const it=PE.cur;PE.cur=null;if(!it)return;
   if(it.t==='pen'){if(it.p.length>1)PE.items.push(it)}
@@ -353,10 +415,10 @@ function reportHtml(v){const sel=(k)=>{const a=v.sel[k]||[];const n=v.notes[k]||
    <h1>טופס ביקור בנכס ${esc(v.caseNo||'')}</h1><div class="m">${esc([v.head.address,v.head.aptNo?'דירה '+v.head.aptNo:'',v.head.hood,v.head.city].filter(Boolean).join(', '))}</div>
    <table style="margin-top:8px"><tr><th>תאריך ושעה</th><td>${esc(fmtDate(v.head.date))} ${esc(v.head.time||'')}</td></tr><tr><th>עורך הביקור</th><td>${esc(v.head.visitor||'')}</td></tr><tr><th>מציג הנכס</th><td>${esc(v.head.presenter||'')}</td></tr><tr><th>מחזיק בפועל</th><td>${esc(v.head.occupant||'')}</td></tr></table>
    ${rows}
-   <h2>${esc(apt.title)}</h2><table>${apt.nums.map(n=>`<tr><th>${esc(n.l)}</th><td>${esc(v.nums[n.k]??'')}</td></tr>`).join('')}<tr><th>קומה אחרונה</th><td>${esc(v.yn.lastFloor||'')}</td></tr><tr><th>חלוקת הדירה</th><td>${esc(v.text.layout||'')}</td></tr></table>
+   <h2>${esc(apt.title)}</h2><table>${apt.nums.map(n=>`<tr><th>${esc(n.l)}</th><td>${esc(v.nums[n.k]??'')}</td></tr>`).join('')}<tr><th>קומה אחרונה</th><td>${esc(v.yn.lastFloor||'')}</td></tr><tr><th>חלוקה פנימית</th><td>${esc(v.text.layout||'').replace(/\n/g,'<br>')}</td></tr></table>
    <h2>חריגות בנייה</h2><p>${esc(v.text.deviations||'—')}</p><h2>הערות</h2><p>${esc(v.text.remarks||'—')}</p>
    <p class="m">${v.photos.length} תמונות בתיקייה "תמונות"${v.plan?' · תשריט מסומן בתיקיית התיק':''}</p></body></html>`}
-function visitData(v){const out={caseNo:v.caseNo,caseId:v.caseId,head:v.head,nums:v.nums,yn:v.yn,text:v.text,sel:v.sel,notes:v.notes,
+function visitData(v){const out={layout:v.layout||null,caseNo:v.caseNo,caseId:v.caseId,head:v.head,nums:v.nums,yn:v.yn,text:v.text,sel:v.sel,notes:v.notes,
   labels:Object.fromEntries(SECTIONS.flatMap(s=>(s.groups||[]).map(g=>[g.k,g.l]))),photos:v.photos.map(p=>p.name),hasPlan:!!v.plan,app:VERSION,updated:v.updated};return out}
 async function syncVisit(){if(!navigator.onLine){toast('אין חיבור לאינטרנט. הכול שמור בטאבלט, אפשר להעלות כשיהיה WiFi.');return}
   if(!cfg.bridge){toast('החיבור לדרייב עוד לא הוגדר (במסך הראשי ← הגדרות)');return}
@@ -381,8 +443,21 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
   if(a==='savecfg'){cfg.visitor=$('#cfgVisitor').value.trim();cfg.bridge=$('#cfgBridge').value.trim();cfg.key=$('#cfgKey').value.trim();await kvSet('cfg',cfg);toast('ההגדרות נשמרו');return home()}
   if(!cur)return;
   if(b.dataset.tab){await visitPut(cur);tab=b.dataset.tab;renderVisit();if(tab==='photos')fillThumbs();if(tab==='plan')fillPlanThumb();return}
-  if(b.dataset.g){const g=SECTIONS.flatMap(s=>s.groups||[]).find(x=>x.k===b.dataset.g);const v=b.dataset.v;let a2=cur.sel[g.k]||[];
-    if(a2.includes(v))a2=a2.filter(x=>x!==v);else a2=g.m?[...a2,v]:[v];cur.sel[g.k]=a2;touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
+  if(b.dataset.g){const g=SECTIONS.flatMap(s=>s.groups||[]).find(x=>x.k===b.dataset.g);const v=b.dataset.v;let a2=cur.sel[g.k]||[];const multi=isMulti(g);
+    if(a2.includes(v))a2=a2.filter(x=>x!==v);else a2=multi?[...a2,v]:[v];cur.sel[g.k]=a2;
+    // a one-way street has one direction: keep only the first if the street stops being two-way/circular
+    SECTIONS.flatMap(s=>s.groups||[]).filter(x=>x.mIf&&x.mIf.k===g.k&&!isMulti(x)&&(cur.sel[x.k]||[]).length>1).forEach(x=>{cur.sel[x.k]=cur.sel[x.k].slice(0,1)});
+    touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
+  if(b.dataset.space!==undefined){const f=+b.dataset.space;const L=lay();
+    if(addTo&&addTo.f===f){const it=L[f].items[addTo.i];(it.subs||(it.subs=[])).push(b.dataset.v)}else{L[f].items.push({n:b.dataset.v,subs:[]})}
+    syncLayoutText();touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
+  if(b.dataset.incl){const [f,i]=b.dataset.incl.split(':').map(Number);addTo=addTo&&addTo.f===f&&addTo.i===i?null:{f,i};const y=scrollY;renderVisit();scrollTo(0,y);return}
+  if(b.hasAttribute('data-incldone')){addTo=null;const y=scrollY;renderVisit();scrollTo(0,y);return}
+  if(b.dataset.delitem){const [f,i]=b.dataset.delitem.split(':').map(Number);lay()[f].items.splice(i,1);addTo=null;syncLayoutText();touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
+  if(b.dataset.delsub){const [f,i,j]=b.dataset.delsub.split(':').map(Number);lay()[f].items[i].subs.splice(j,1);syncLayoutText();touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
+  if(b.dataset.mamadroom!==undefined){const fl=lay()[+b.dataset.mamadroom];fl.mamadRoom=!fl.mamadRoom;syncLayoutText();touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
+  if(b.hasAttribute('data-addfloor')){const L=lay();if(L.length===1&&!L[0].floor)L[0].floor='';L.push({floor:'',items:[],mamadRoom:false});addTo=null;touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
+  if(b.dataset.delfloor!==undefined){lay().splice(+b.dataset.delfloor,1);addTo=null;syncLayoutText();touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
   if(b.dataset.yn){cur.yn[b.dataset.yn]=cur.yn[b.dataset.yn]===b.dataset.v?'':b.dataset.v;touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
   if(b.dataset.inc||b.dataset.dec){const k=b.dataset.inc||b.dataset.dec;const s=+b.dataset.s||1;const n=parseFloat(cur.nums[k])||0;cur.nums[k]=String(Math.max(0,b.dataset.inc?n+s:n-s));touch();const i=document.querySelector(`[data-num="${k}"]`);if(i)i.value=cur.nums[k];return}
   if(b.dataset.quick){const k=b.dataset.quick;const t=(cur.text[k]||'').trim();cur.text[k]=t?t.replace(/[,،]?\s*$/,'')+', '+b.dataset.v:b.dataset.v;touch();const ta=document.querySelector(`[data-text="${k}"]`);if(ta)ta.value=cur.text[k];return}
@@ -391,14 +466,16 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
   if(a==='editplan'){const bl=await blobGet(cur.plan.base);return openEditor({mode:'draw',src:bl,items:JSON.parse(JSON.stringify(cur.plan.items||[]))})}
   if(a==='newplan'){if(cur.plan?.base)await blobDel(cur.plan.base);cur.plan=null;touch();await visitPut(cur);return renderVisit()}
   if(a==='sync')return syncVisit();
+  if(a==='camera')return openCamera();
   if(a==='delvisit'){if(b.dataset.sure){for(const p of cur.photos)await blobDel(p.k);if(cur.plan?.base)await blobDel(cur.plan.base);await visitDel(cur.id);toast('הביקור נמחק מהטאבלט');return home()}b.dataset.sure='1';b.textContent='לחצו שוב כדי למחוק';return}
 });
 document.addEventListener('input',e=>{if(!cur)return;const t=e.target;
   if(t.dataset.head){cur.head[t.dataset.head]=t.value;if(t.dataset.head==='address'||t.dataset.head==='city'){cur.title=[cur.head.address,cur.head.city].filter(Boolean).join(', ')||'ביקור חדש'}touch();return}
   if(t.dataset.note){const k=t.dataset.note;(cur.notes[k]||(cur.notes[k]={}))[t.dataset.v]=t.value;touch();return}
   if(t.dataset.num){cur.nums[t.dataset.num]=t.value;touch();return}
-  if(t.dataset.text){cur.text[t.dataset.text]=t.value;touch();return}});
+  if(t.dataset.text){cur.text[t.dataset.text]=t.value;if(t.dataset.text==='layoutNote')syncLayoutText();touch();return}});
 document.addEventListener('change',async e=>{const t=e.target;
+  if(t.dataset.floorname!==undefined&&cur){lay()[+t.dataset.floorname].floor=t.value;syncLayoutText();touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
   if(t.dataset.photo!==undefined&&t.files?.length){await addPhotos([...t.files]);t.value='';return}
   if(t.dataset.planfile!==undefined&&t.files?.[0]){const f=t.files[0];t.value='';try{await loadPlanSource(f)}catch(_){toast('לא הצלחתי לפתוח את הקובץ')}}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&cur)visitPut(cur)});
