@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.2.1';
+const VERSION='1.2.2';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -347,7 +347,8 @@ function onPeResize(){if(PE)syncCanvas()}
 function syncCanvas(){const st=$('#peStage').getBoundingClientRect();const dpr=devicePixelRatio||1;const w=Math.round(st.width*dpr),h=Math.round(st.height*dpr);if(PE.cv.width!==w||PE.cv.height!==h){PE.cv.width=w;PE.cv.height=h;PE.dpr=dpr}peDraw()}
 function zoomAt(x,y,f){const v=PE.view;const ns=Math.max(.05,Math.min(20,v.s*f));const k=ns/v.s;v.x=x-(x-v.x)*k;v.y=y-(y-v.y)*k;v.s=ns;peDraw()}
 const DLOG=[];
-function penDiag(e){const d=$('#penDiag');if(!d)return;const h=PE&&PE.hover?Math.round(performance.now()-PE.hover.t)+'ms':'-';
+function penDiag(e){const d=$('#penDiag');if(!d)return;if(e.type==='pointermove'&&!e.buttons)return; // skip hover noise
+  const h=PE&&PE.hover?Math.round(performance.now()-PE.hover.t)+'ms':'-';
   DLOG.unshift(`${e.type.replace('pointer','')} ${e.pointerType} b=${e.button} bs=${e.buttons} p=${(e.pressure||0).toFixed(2)} w=${Math.round(e.width||0)} h=${Math.round(e.height||0)} hover=${h}`);DLOG.length=Math.min(DLOG.length,6);d.textContent=DLOG.join('\n')}
 // The Samsung pen with its side button held may arrive as a "touch". It is still the pen when the pen was hovering at the same spot a moment ago, or when the contact is pen-sized.
 function penAsTouch(e,x,y){const h=PE.hover;if(h&&performance.now()-h.t<700&&Math.hypot(h.x-x,h.y-y)<70)return true;return (e.width>0&&e.width<=3&&e.height>0&&e.height<=3)}
