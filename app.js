@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.2.2';
+const VERSION='1.2.3';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -351,7 +351,7 @@ function penDiag(e){const d=$('#penDiag');if(!d)return;if(e.type==='pointermove'
   const h=PE&&PE.hover?Math.round(performance.now()-PE.hover.t)+'ms':'-';
   DLOG.unshift(`${e.type.replace('pointer','')} ${e.pointerType} b=${e.button} bs=${e.buttons} p=${(e.pressure||0).toFixed(2)} w=${Math.round(e.width||0)} h=${Math.round(e.height||0)} hover=${h}`);DLOG.length=Math.min(DLOG.length,6);d.textContent=DLOG.join('\n')}
 // The Samsung pen with its side button held may arrive as a "touch". It is still the pen when the pen was hovering at the same spot a moment ago, or when the contact is pen-sized.
-function penAsTouch(e,x,y){const h=PE.hover;if(h&&performance.now()-h.t<700&&Math.hypot(h.x-x,h.y-y)<70)return true;return (e.width>0&&e.width<=3&&e.height>0&&e.height<=3)}
+function penAsTouch(e,x,y){const h=PE.hover;if(h&&performance.now()-h.t<600&&Math.hypot(h.x-x,h.y-y)<80)return true;return (e.width<=3&&e.height<=3&&e.pressure>=.99)}
 function pd(e){penDiag(e);const st=$('#peStage');try{st.setPointerCapture(e.pointerId)}catch(_){}const r=st.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;
   if(e.pointerType==='touch'){
     if(PE.mode!=='crop'&&!PE.penActive&&penAsTouch(e,x,y)){PE.erasing=true;PE.erasePtr=e.pointerId;$('#peMsg').textContent='מחיקה (כפתור העט לחוץ)';eraseAt(s2w(x,y),14/PE.view.s);return}
@@ -372,7 +372,7 @@ function pd(e){penDiag(e);const st=$('#peStage');try{st.setPointerCapture(e.poin
   else if(t==='erase'){eraseAt(w,14*px)}
   peDraw()}
 function pm(e){penDiag(e);const st=$('#peStage');const r=st.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;
-  if(e.pointerType==='pen'&&!e.buttons)PE.hover={x,y,t:performance.now()};
+  if(e.pointerType==='pen'&&!(e.pressure>0))PE.hover={x,y,t:performance.now(),btn:!!e.buttons}; // hovering (with or without the side button)
   if(PE.erasePtr===e.pointerId){eraseAt(s2w(x,y),14/PE.view.s);return}
   const ent=PE.pointers.get(e.pointerId);
   if(ent&&!ent.crop){const prev={x:ent.x,y:ent.y};ent.x=x;ent.y=y;
