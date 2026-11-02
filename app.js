@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.2.3';
+const VERSION='1.2.4';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -175,7 +175,7 @@ function chipGroup(g0){const g={...g0,m:isMulti(g0)};const vals=cur.sel[g.k]||[]
    ${(g.extra||[]).map(x=>numField(x)).join('')}
    ${!g.m||vals.length<=1?`<div class="notes"><input class="t" data-note="${g.k}" data-v="_" value="${esc(notes._||'')}" placeholder="הערה (לא חובה)"></div>`:''}
   </div>`}
-function numField(x){const v=cur.nums[x.k]??'';return `<label class="grp" style="display:inline-flex;flex-direction:column;gap:4px;margin-inline-end:16px"><span class="hint">${esc(x.l)}</span>${x.t?`<input class="t" data-num="${x.k}" value="${esc(v)}" style="width:140px">`:`<span class="step"><button type="button" data-dec="${x.k}" data-s="${x.step||1}">−</button><input class="t" inputmode="decimal" data-num="${x.k}" value="${esc(v)}"><button type="button" data-inc="${x.k}" data-s="${x.step||1}">+</button></span>`}</label>`}
+function numField(x){const v=cur.nums[x.k]??'';return `<label class="grp" style="display:inline-flex;flex-direction:column;gap:4px;margin-inline-end:16px"><span class="hint">${esc(x.l)}</span>${x.t?`<input class="t" inputmode="numeric" data-num="${x.k}" value="${esc(v)}" style="width:140px">`:`<span class="step"><button type="button" data-dec="${x.k}" data-s="${x.step||1}">−</button><input class="t" inputmode="decimal" data-num="${x.k}" value="${esc(v)}"><button type="button" data-inc="${x.k}" data-s="${x.step||1}">+</button></span>`}</label>`}
 function renderVisit(){$('#backBtn').classList.remove('hidden');$('#title').textContent=(cur.caseNo?cur.caseNo+' · ':'')+cur.title;
   const sec=SECTIONS.find(s=>s.id===tab);let body='';
   if(sec.head){body=`<div class="card"><h2>פרטי הביקור</h2><div class="fields">${HEAD_FIELDS.map(f=>`<label>${esc(f.l)}<input class="t" data-head="${f.k}" type="${f.type||'text'}" value="${esc(cur.head[f.k]||'')}"></label>`).join('')}</div></div>
@@ -524,6 +524,16 @@ document.addEventListener('change',async e=>{const t=e.target;
   if(t.dataset.photo!==undefined&&t.files?.length){const again=t.dataset.again!==undefined;await addPhotos([...t.files],again);t.value='';if(again){const n=document.querySelector('input[data-again]');if(n)try{n.click()}catch(_){}}return}
   if(t.dataset.planfile!==undefined&&t.files?.[0]){const f=t.files[0];t.value='';try{await loadPlanSource(f)}catch(_){toast('לא הצלחתי לפתוח את הקובץ')}}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&cur)visitPut(cur)});
+
+/* keyboard hints: Hebrew for text, digits for numbers */
+const NUMERIC_HEAD=['aptNo'];
+function kbHints(root){root.querySelectorAll('input:not([type=date]):not([type=time]):not([type=checkbox]):not([type=file]),textarea').forEach(el=>{
+  if(el.dataset.kb)return;el.dataset.kb='1';
+  if(el.dataset.head&&NUMERIC_HEAD.includes(el.dataset.head))el.setAttribute('inputmode','numeric');
+  if(el.getAttribute('inputmode')==='decimal'||el.getAttribute('inputmode')==='numeric'){el.setAttribute('lang','en');el.setAttribute('dir','ltr');el.style.textAlign='center';return}
+  if(el.getAttribute('dir')==='ltr')return; // urls, keys
+  el.setAttribute('lang','he');el.setAttribute('dir','rtl');el.setAttribute('autocapitalize','off');el.setAttribute('autocorrect','off')})}
+new MutationObserver(()=>kbHints(document.body)).observe(document.body,{childList:true,subtree:true});
 
 /* ---------------- boot ---------------- */
 (async()=>{netState();await loadCfg();
