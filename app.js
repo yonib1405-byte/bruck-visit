@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.3.3';
+const VERSION='1.4.0';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -115,7 +115,7 @@ async function loadCfg(){cfg={...cfg,...(await kvGet('cfg')||{})};
 async function bridgeGet(params){if(!cfg.bridge)throw new Error('nobridge');const u=new URL(cfg.bridge);Object.entries({...params,key:cfg.key}).forEach(([k,v])=>u.searchParams.set(k,v));
   const r=await fetch(u.toString(),{redirect:'follow'});let j;try{j=await r.json()}catch(_){throw new Error(/\/dev(\?|$)/.test(cfg.bridge)?'dev':'notjson')}if(j.error)throw new Error(j.error);return j}
 async function bridgePost(body){if(!cfg.bridge)throw new Error('nobridge');
-  const r=await fetch(cfg.bridge,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...body,key:cfg.key}),redirect:'follow'});
+  const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),90000);let r;try{r=await fetch(cfg.bridge,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...body,key:cfg.key}),redirect:'follow',signal:ctl.signal})}finally{clearTimeout(to)}
   let j;try{j=await r.json()}catch(_){throw new Error(/\/dev(\?|$)/.test(cfg.bridge)?'dev':'notjson')}if(j.error)throw new Error(j.error);return j}
 function blobToB64(b){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(String(fr.result).split(',')[1]);fr.onerror=rej;fr.readAsDataURL(b)})}
 function b64ToBlob(b64,mime){const bin=atob(b64);const a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);return new Blob([a],{type:mime})}
@@ -257,7 +257,7 @@ async function camShot(){const C=CAM;if(!C)return;const f=C.el.querySelector('.f
 async function closeCamera(){const C=CAM;if(!C)return;let w=0;while(C.busy>0&&w<40){await new Promise(r=>setTimeout(r,100));w++}
   C.stream.getTracks().forEach(t=>t.stop());C.el.remove();CAM=null;if(C.n)toast(`נשמרו ${C.n} תמונות`);renderVisit();fillThumbs()}
 async function fillThumbs(){for(const img of document.querySelectorAll('[data-thumb]')){const b=await blobGet(img.dataset.thumb);if(b){img.src=URL.createObjectURL(b)}}}
-async function shrink(file,max=2400,q=.85){const url=URL.createObjectURL(file);try{const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url});
+async function shrink(file,max=1920,q=.82){const url=URL.createObjectURL(file);try{const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url});
   const s=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));if(s===1&&file.size<3e6&&file.type==='image/jpeg')return file;
   const c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*s);c.height=Math.round(img.naturalHeight*s);c.getContext('2d').drawImage(img,0,0,c.width,c.height);
   return await new Promise(r=>c.toBlob(r,'image/jpeg',q))}finally{URL.revokeObjectURL(url)}}
@@ -489,20 +489,36 @@ function reportHtml(v,planPages){planPages=planPages||[];const sel=(k)=>{const a
    <div style="color:#5b6f66;margin-top:3px">${v.photos.length} תמונות בתיקייה "תמונות"${planPages.length?` · ${planPages.length>1?planPages.length+' תשריטים מסומנים בעמודים הבאים':'התשריט המסומן בעמוד הבא'}`:''}</div>
    ${planPages.map(pp=>`<div class="pp"><h2>תשריט${pp.label?' – '+esc(pp.label):''} · סימוני הביקור ${esc(v.caseNo||'')}</h2><img src="${pp.url}"></div>`).join('')}
   </body></html>`}
-async function planJpegDataUrl(p){const b=await renderPlanBlob(p);if(!b)return '';const img=await blobToImage(b);const s=Math.min(1,3200/Math.max(img.width,img.height));
-  const c=document.createElement('canvas');c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.85)}
+async function planJpegDataUrl(p){const b=await renderPlanBlob(p);if(!b)return '';const img=await blobToImage(b);const s=Math.min(1,2600/Math.max(img.width,img.height));
+  const c=document.createElement('canvas');c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.8)}
 function visitData(v){const out={layout:v.layout||null,caseNo:v.caseNo,caseId:v.caseId,head:v.head,nums:v.nums,yn:v.yn,text:v.text,sel:v.sel,notes:v.notes,
   labels:Object.fromEntries(SECTIONS.flatMap(s=>(s.groups||[]).map(g=>[g.k,g.l]))),photos:v.photos.map(p=>p.name),plans:plansOf(v).map(p=>p.label||''),app:VERSION,updated:v.updated};return out}
+async function withRetry(fn,tries=3){let last;for(let i=0;i<tries;i++){try{return await fn()}catch(e){last=e;if(['key','nofolder','dev','notjson','action'].includes(e.message))throw e;await new Promise(r=>setTimeout(r,1500*(i+1)))}}throw last}
 async function syncVisit(){if(!navigator.onLine){toast('אין חיבור לאינטרנט. הכול שמור בטאבלט, אפשר להעלות כשיהיה WiFi.');return}
   if(!cfg.bridge){toast('החיבור לדרייב עוד לא הוגדר (במסך הראשי ← הגדרות)');return}
   const btn=document.querySelector('[data-act="sync"]');const set=t=>{if(btn){btn.textContent=t;btn.disabled=true}};
-  try{let i=0;const total=cur.photos.filter(p=>!p.up).length;
-    for(const p of cur.photos){if(p.up)continue;i++;set(`מעלה תמונה ${i}/${total}…`);const b=await blobGet(p.k);if(!b){p.up=true;continue}
-      const r=await bridgePost({action:'upload',folderId:cur.folderId,caseNo:cur.caseNo,sub:'תמונות',name:p.name,mime:'image/jpeg',data:await blobToB64(b)});if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;p.up=true;await visitPut(cur)}
+  let wake=null;try{wake=await navigator.wakeLock?.request('screen')}catch(_){} // keep the tablet awake while uploading
+  try{
+    // 1. find the case folder and its "תמונות" folder once
+    set('מתחבר לתיקייה…');let photosId='';
+    try{const pr=await withRetry(()=>bridgePost({action:'prep',folderId:cur.folderId,caseNo:cur.caseNo}));if(pr.folderId)cur.folderId=pr.folderId;photosId=pr.photosId||''}
+    catch(e){if(['key','nofolder','dev','notjson'].includes(e.message))throw e} // an older bridge has no "prep": photos then go one by one
+    // 2. photos, three at a time, each retried on a weak connection
+    const todo=cur.photos.filter(p=>!p.up);let done=0;const total=todo.length;
+    const one=async p=>{const b0=await blobGet(p.k);if(!b0){p.up=true;return}
+      const b=b0.size>900e3?await shrink(b0):b0;
+      const body={action:'upload',name:p.name,mime:'image/jpeg',data:await blobToB64(b)};
+      if(photosId)body.targetId=photosId;else Object.assign(body,{folderId:cur.folderId,caseNo:cur.caseNo,sub:'תמונות'});
+      const r=await withRetry(()=>bridgePost(body));if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;
+      p.up=true;done++;set(`מעלה תמונות ${done}/${total}…`);await visitPut(cur)};
+    if(total)set(`מעלה תמונות 0/${total}…`);
+    const lanes=photosId?3:1;let idx=0;
+    await Promise.all(Array.from({length:Math.min(lanes,total)},async()=>{while(idx<todo.length){const p=todo[idx++];await one(p)}}));
     set('מעלה טופס…');const pages=[];for(const p of plansOf(cur)){const url=await planJpegDataUrl(p);if(url)pages.push({label:p.label,url})}
-    const r=await bridgePost({action:'visit',folderId:cur.folderId,caseNo:cur.caseNo,json:JSON.stringify(visitData(cur)),html:reportHtml(cur,pages)});if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;
+    const r=await withRetry(()=>bridgePost({action:'visit',folderId:cur.folderId,caseNo:cur.caseNo,json:JSON.stringify(visitData(cur)),html:reportHtml(cur,pages)}),2);if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;
     cur.synced=new Date().toISOString();cur.dirtyAfterSync=false;await visitPut(cur);toast('הביקור הועלה לתיקיית התיק בדרייב ✓',3500)}
   catch(e){toast(['dev','notjson'].includes(e.message)?errText(e):e.message==='key'?'המפתח שגוי. בדקו את ההגדרות.':e.message==='nofolder'?'לא נמצאה תיקיית התיק בדרייב. בדקו את מספר התיק.':'ההעלאה נעצרה. מה שהועלה נשמר, ואפשר ללחוץ שוב כדי להמשיך.',4500);await visitPut(cur)}
+  finally{try{wake&&wake.release()}catch(_){}}
   renderVisit();if(tab==='photos')fillThumbs();if(tab==='plan')fillPlanThumb()}
 
 /* ---------------- events ---------------- */
