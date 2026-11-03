@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.3.0';
+const VERSION='1.3.1';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -287,10 +287,18 @@ async function loadPlanSource(blob){
     pdfjsLib.GlobalWorkerOptions.workerSrc='vendor/pdf.worker.min.js';
     const pdf=await pdfjsLib.getDocument({data:await blob.arrayBuffer()}).promise;
     const pick=pdf.numPages===1?1:await choosePage(pdf);if(!pick)return;
-    const page=await pdf.getPage(pick);const vp=page.getViewport({scale:1});const scale=Math.min(4,3200/Math.max(vp.width,vp.height));const v2=page.getViewport({scale});
-    const c=document.createElement('canvas');c.width=v2.width;c.height=v2.height;const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
-    await page.render({canvasContext:ctx,viewport:v2}).promise;const b=await new Promise(r=>c.toBlob(r,'image/png'));return openCrop(b)}
-  return openCrop(blob)}
+    const page=await pdf.getPage(pick);const vp=page.getViewport({scale:1});const scale=Math.min(4,3200/Math.max(vp.width,vp.height));
+    toast('מכין את העמוד…',1500);const b=await renderPdfRegion(page,scale,0,0,vp.width,vp.height);
+    PDFSRC={page,scale};return openCrop(b,true)}
+  PDFSRC=null;return openCrop(blob)}
+let PDFSRC=null; // the PDF page being cropped, so the chosen part can be re-drawn sharp
+const MAX_PX=14e6, MAX_SIDE=7000; // stay inside the tablet browser's canvas limits
+// draw a region of a PDF page (in PDF units) at a given scale
+async function renderPdfRegion(page,scale,x,y,w,h){const c=document.createElement('canvas');c.width=Math.max(1,Math.round(w*scale));c.height=Math.max(1,Math.round(h*scale));
+  const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
+  const vp=page.getViewport({scale,offsetX:-x*scale,offsetY:-y*scale});await page.render({canvasContext:ctx,viewport:vp}).promise;
+  return await new Promise(r=>c.toBlob(r,'image/png'))}
+function sharpScale(w,h){return Math.min(14,MAX_SIDE/Math.max(w,h),Math.sqrt(MAX_PX/(w*h)))}
 function choosePage(pdf){return new Promise(async res=>{const pop=document.createElement('div');pop.className='pop';pop.innerHTML=`<div class="box" style="width:min(720px,100%)"><h3>באיזה עמוד התשריט?</h3><div class="pages" id="pgs"></div><button class="btn" type="button" id="pgx">ביטול</button></div>`;document.body.appendChild(pop);
   pop.querySelector('#pgx').onclick=()=>{pop.remove();res(0)};const g=pop.querySelector('#pgs');
   for(let i=1;i<=Math.min(pdf.numPages,40);i++){const b=document.createElement('button');b.type='button';b.innerHTML=`<div class="hint">עמוד ${i}</div>`;b.onclick=()=>{pop.remove();res(i)};g.appendChild(b);
@@ -301,7 +309,7 @@ const PLAN_FLOORS=['קומת מרתף','קומת קרקע','קומה א\'','קו
 let planIdx=-1; // which plan the editor works on (-1 = adding a new one)
 /* plan editor: crop first, then annotate. Pen draws; fingers pan and zoom. */
 let PE=null;
-function openCrop(blob){planIdx=-1;return openEditor({mode:'crop',src:blob})}
+function openCrop(blob,isPdf){planIdx=-1;if(!isPdf)PDFSRC=null;return openEditor({mode:'crop',src:blob})}
 async function openEditor(o){
   const img=await blobToImage(o.src);
   const wrap=document.createElement('div');wrap.id='planEd';
@@ -421,7 +429,13 @@ function askText(title,val,num){return new Promise(res=>{const pop=document.crea
   document.body.appendChild(pop);const i=pop.querySelector('#askV');setTimeout(()=>i.focus(),50);
   pop.querySelector('form').onsubmit=ev=>{ev.preventDefault();pop.remove();res(i.value.trim())};pop.querySelector('#askX').onclick=()=>{pop.remove();res(null)}})}
 async function finishCrop(c){let blob;
-  if(c){const x=Math.max(0,Math.min(c.x1,c.x2)),y=Math.max(0,Math.min(c.y1,c.y2)),w=Math.min(PE.img.width-x,Math.abs(c.x2-c.x1)),h=Math.min(PE.img.height-y,Math.abs(c.y2-c.y1));
+  if(PDFSRC){const {page,scale}=PDFSRC;let x=0,y=0,w=PE.img.width,h=PE.img.height;
+    if(c){x=Math.max(0,Math.min(c.x1,c.x2));y=Math.max(0,Math.min(c.y1,c.y2));w=Math.min(PE.img.width-x,Math.abs(c.x2-c.x1));h=Math.min(PE.img.height-y,Math.abs(c.y2-c.y1))}
+    const X=x/scale,Y=y/scale,W=w/scale,H=h/scale;$('#peMsg').textContent='מחדד את התשריט…';
+    try{blob=await renderPdfRegion(page,sharpScale(W,H),X,Y,W,H)}catch(_){blob=null}
+    PDFSRC=null}
+  if(blob){}
+  else if(c){const x=Math.max(0,Math.min(c.x1,c.x2)),y=Math.max(0,Math.min(c.y1,c.y2)),w=Math.min(PE.img.width-x,Math.abs(c.x2-c.x1)),h=Math.min(PE.img.height-y,Math.abs(c.y2-c.y1));
     const cv=document.createElement('canvas');cv.width=Math.round(w);cv.height=Math.round(h);cv.getContext('2d').drawImage(PE.img,x,y,w,h,0,0,w,h);blob=await new Promise(r=>cv.toBlob(r,'image/png'))}
   else{const cv=document.createElement('canvas');cv.width=PE.img.width;cv.height=PE.img.height;cv.getContext('2d').drawImage(PE.img,0,0);blob=await new Promise(r=>cv.toBlob(r,'image/png'))}
   const P=plansOf(cur);const id='p'+uid();const k='planbase:'+cur.id+':'+id;await blobPut(k,blob);
@@ -474,7 +488,7 @@ function reportHtml(v,planPages){planPages=planPages||[];const sel=(k)=>{const a
    <div style="color:#5b6f66;margin-top:3px">${v.photos.length} תמונות בתיקייה "תמונות"${planPages.length?` · ${planPages.length>1?planPages.length+' תשריטים מסומנים בעמודים הבאים':'התשריט המסומן בעמוד הבא'}`:''}</div>
    ${planPages.map(pp=>`<div class="pp"><h2>תשריט${pp.label?' – '+esc(pp.label):''} · סימוני הביקור ${esc(v.caseNo||'')}</h2><img src="${pp.url}"></div>`).join('')}
   </body></html>`}
-async function planJpegDataUrl(p){const b=await renderPlanBlob(p);if(!b)return '';const img=await blobToImage(b);const s=Math.min(1,2200/Math.max(img.width,img.height));
+async function planJpegDataUrl(p){const b=await renderPlanBlob(p);if(!b)return '';const img=await blobToImage(b);const s=Math.min(1,3200/Math.max(img.width,img.height));
   const c=document.createElement('canvas');c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.85)}
 function visitData(v){const out={layout:v.layout||null,caseNo:v.caseNo,caseId:v.caseId,head:v.head,nums:v.nums,yn:v.yn,text:v.text,sel:v.sel,notes:v.notes,
   labels:Object.fromEntries(SECTIONS.flatMap(s=>(s.groups||[]).map(g=>[g.k,g.l]))),photos:v.photos.map(p=>p.name),plans:plansOf(v).map(p=>p.label||''),app:VERSION,updated:v.updated};return out}
