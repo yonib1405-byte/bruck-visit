@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.2.4';
+const VERSION='1.3.0';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -142,7 +142,7 @@ async function home(){cur=null;$('#title').textContent='ביקור בנכס';$('
   $('#main').innerHTML=`
    ${!cfg.bridge?`<div class="card" style="border-color:var(--gold)"><h2>חיבור לדרייב עוד לא הוגדר</h2><div class="hint">אפשר לעבוד ולמלא ביקורים כבר עכשיו. כדי לקבל את רשימת התיקים ולהעלות לדרייב, פותחים בטאבלט את "קישור ההגדרה לטאבלט" מהמערכת במשרד.</div></div>`:''}
    <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">ביקורים בטאבלט</h2><button class="btn" type="button" data-act="manual">+ ביקור ללא תיק</button></div>
-     <div class="list" style="margin-top:12px">${vs.map(v=>`<button class="case" type="button" data-open="${esc(v.id)}"><span class="no">${esc(v.caseNo||'—')}</span><span class="main"><b>${esc(v.title)}</b><span class="hint">${fmtDate(v.head.date)} ${esc(v.head.time||'')} · ${v.photos.length} תמונות${v.plan?' · תשריט':''}</span></span><span class="st ${v.synced&&!v.dirtyAfterSync?'done':'draft'}">${v.synced&&!v.dirtyAfterSync?'הועלה לדרייב':v.synced?'יש שינויים':'לא הועלה'}</span></button>`).join('')||'<div class="hint">אין ביקורים פתוחים בטאבלט.</div>'}</div></div>
+     <div class="list" style="margin-top:12px">${vs.map(v=>`<button class="case" type="button" data-open="${esc(v.id)}"><span class="no">${esc(v.caseNo||'—')}</span><span class="main"><b>${esc(v.title)}</b><span class="hint">${fmtDate(v.head.date)} ${esc(v.head.time||'')} · ${v.photos.length} תמונות${plansOf(v).length?' · '+plansOf(v).length+' תשריטים':''}</span></span><span class="st ${v.synced&&!v.dirtyAfterSync?'done':'draft'}">${v.synced&&!v.dirtyAfterSync?'הועלה לדרייב':v.synced?'יש שינויים':'לא הועלה'}</span></button>`).join('')||'<div class="hint">אין ביקורים פתוחים בטאבלט.</div>'}</div></div>
    <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">תיקים מהמשרד</h2><button class="btn dark" type="button" data-act="refresh" ${navigator.onLine&&cfg.bridge?'':'disabled'}>עדכון מהמשרד</button></div>
      <div class="hint" style="margin-top:4px">${lastSync?'עודכן לאחרונה '+new Date(lastSync).toLocaleString('he-IL'):'עוד לא עודכן'}${navigator.onLine?'':' · אין חיבור כרגע, מוצגת הרשימה השמורה'}</div>
      <div class="list" style="margin-top:12px">${upcoming.map(c=>`<button class="case" type="button" data-start="${esc(c.id)}"><span class="no">${esc(c.caseNo||'—')}</span><span class="main"><b>${esc([c.address,c.city].filter(Boolean).join(', '))}</b><span class="hint">${esc(c.client||'')}${c.visitDate?' · ביקור '+fmtDate(c.visitDate)+' '+esc(c.visitTime||''):''}${c.plans&&c.plans.length?' · '+c.plans.length+' תשריטים שמורים':''}</span></span><span class="st">התחלת ביקור</span></button>`).join('')||'<div class="hint">אין תיקים ברשימה.</div>'}</div></div>
@@ -265,15 +265,23 @@ async function addPhotos(files,quiet){let n=cur.photos.length;for(const f of fil
   cur.photos.push({k,name:`${cur.caseNo||'ביקור'}_${String(n).padStart(2,'0')}.jpg`,up:false})}touch();await visitPut(cur);renderVisit();fillThumbs();toast(quiet?`נשמרה · סה"כ ${cur.photos.length} תמונות`:`נוספו ${files.length} תמונות`,1500)}
 
 /* ---------------- plan (תשריט) ---------------- */
-function planHtml(){const c=cases.find(x=>x.id===cur.caseId);const plans=c?.plans||[];
-  return `<div class="card"><h2>תשריט / היתר</h2>
-   ${cur.plan&&cur.plan.base?`<img class="planthumb" id="planThumb" alt="התשריט המסומן"><div class="row" style="margin-top:10px"><button class="btn primary" type="button" data-act="editplan">המשך סימון</button><button class="btn danger" type="button" data-act="newplan">החלפת התשריט</button></div>`:
-   `<div class="hint" style="margin-bottom:10px">בוחרים קובץ היתר או תשריט (PDF או תמונה), בוחרים עמוד, חותכים את הדירה ומסמנים עליה בעט.</div>
-    <div class="row">${plans.map(p=>`<button class="btn dark" type="button" data-loadplan="${esc(p.k)}">${esc(p.name)}</button>`).join('')}
+function planHtml(){const c=cases.find(x=>x.id===cur.caseId);const files=c?.plans||[];const P=plansOf(cur);
+  const floorsFromLayout=(cur.layout||[]).map(f=>f.floor).filter(Boolean);
+  return `<div class="card"><h2>תשריטים <span class="hint">${P.length?`· ${P.length} בביקור הזה · כל תשריט בעמוד נפרד ב-PDF`:''}</span></h2>
+   ${P.map((p,i)=>`<div class="plancard">
+     <div class="row" style="gap:8px;margin-bottom:8px"><b>תשריט ${i+1}</b>
+       <select class="t" data-planlabel="${i}" style="width:auto;min-width:170px"><option value="">ללא כותרת</option>${[...new Set([...floorsFromLayout,...PLAN_FLOORS])].map(f=>`<option ${f===p.label?'selected':''}>${esc(f)}</option>`).join('')}${p.label&&![...floorsFromLayout,...PLAN_FLOORS].includes(p.label)?`<option selected>${esc(p.label)}</option>`:''}</select>
+       <span class="sp" style="flex:1"></span>
+       <button class="btn primary" type="button" data-editplan="${i}">המשך סימון</button>
+       <button class="btn danger" type="button" data-delplan="${i}">${p._sure?'לחצו שוב להסרה':'הסרה'}</button></div>
+     <img class="planthumb" data-planthumb="${i}" alt="תשריט ${i+1}"></div>`).join('')}
+   <div class="${P.length?'addplan':''}">
+    <div class="hint" style="margin-bottom:10px">${P.length?'<b>הוספת תשריט נוסף</b> (למשל קומה נוספת): ':''}בוחרים קובץ היתר או תשריט (PDF או תמונה), בוחרים עמוד, חותכים ומסמנים בעט.</div>
+    <div class="row">${files.map(p=>`<button class="btn dark" type="button" data-loadplan="${esc(p.k)}">${esc(p.name)}</button>`).join('')}
     <label class="btn primary">קובץ מהטאבלט<input type="file" accept="application/pdf,image/*" data-planfile hidden></label>
     <label class="btn">צילום של התשריט<input type="file" accept="image/*" capture="environment" data-planfile hidden></label></div>
-    ${plans.length?'':'<div class="hint" style="margin-top:8px">קבצי PDF מתיקיית התיק יורדים לטאבלט ב"עדכון מהמשרד" כשהשם שלהם, או שם תת־התיקייה שבה הם נמצאים, כולל "היתר", "תשריט", "תכנית", "תיק בניין" או "בית משותף".</div>'}`}</div>`}
-async function fillPlanThumb(){const i=$('#planThumb');if(!i||!cur.plan)return;const b=await renderPlanBlob();if(b)i.src=URL.createObjectURL(b)}
+    ${files.length?'':'<div class="hint" style="margin-top:8px">קבצי PDF מתיקיית התיק יורדים לטאבלט ב"עדכון מהמשרד" כשהשם שלהם, או שם תת־התיקייה שבה הם נמצאים, כולל "היתר", "תשריט", "תכנית", "תיק בניין" או "בית משותף".</div>'}</div></div>`}
+async function fillPlanThumb(){const P=plansOf(cur);for(const img of document.querySelectorAll('[data-planthumb]')){const p=P[+img.dataset.planthumb];if(!p)continue;const b=await renderPlanBlob(p);if(b)img.src=URL.createObjectURL(b)}}
 async function loadPlanSource(blob){
   if(blob.type==='application/pdf'||/pdf/.test(blob.type)){
     pdfjsLib.GlobalWorkerOptions.workerSrc='vendor/pdf.worker.min.js';
@@ -288,9 +296,12 @@ function choosePage(pdf){return new Promise(async res=>{const pop=document.creat
   for(let i=1;i<=Math.min(pdf.numPages,40);i++){const b=document.createElement('button');b.type='button';b.innerHTML=`<div class="hint">עמוד ${i}</div>`;b.onclick=()=>{pop.remove();res(i)};g.appendChild(b);
     try{const p=await pdf.getPage(i);const vp=p.getViewport({scale:.25});const c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;await p.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;const im=new Image();im.src=c.toDataURL();b.appendChild(im)}catch(_){}}})}
 
+function plansOf(v){if(!v.plans){v.plans=v.plan&&v.plan.base?[{id:'p0',label:'',base:v.plan.base,items:v.plan.items||[]}]:[];delete v.plan}return v.plans}
+const PLAN_FLOORS=['קומת מרתף','קומת קרקע','קומה א\'','קומה ב\'','קומה ג\'','קומת גלריה','קומת גג'];
+let planIdx=-1; // which plan the editor works on (-1 = adding a new one)
 /* plan editor: crop first, then annotate. Pen draws; fingers pan and zoom. */
 let PE=null;
-function openCrop(blob){return openEditor({mode:'crop',src:blob})}
+function openCrop(blob){planIdx=-1;return openEditor({mode:'crop',src:blob})}
 async function openEditor(o){
   const img=await blobToImage(o.src);
   const wrap=document.createElement('div');wrap.id='planEd';
@@ -413,16 +424,18 @@ async function finishCrop(c){let blob;
   if(c){const x=Math.max(0,Math.min(c.x1,c.x2)),y=Math.max(0,Math.min(c.y1,c.y2)),w=Math.min(PE.img.width-x,Math.abs(c.x2-c.x1)),h=Math.min(PE.img.height-y,Math.abs(c.y2-c.y1));
     const cv=document.createElement('canvas');cv.width=Math.round(w);cv.height=Math.round(h);cv.getContext('2d').drawImage(PE.img,x,y,w,h,0,0,w,h);blob=await new Promise(r=>cv.toBlob(r,'image/png'))}
   else{const cv=document.createElement('canvas');cv.width=PE.img.width;cv.height=PE.img.height;cv.getContext('2d').drawImage(PE.img,0,0);blob=await new Promise(r=>cv.toBlob(r,'image/png'))}
-  const k='planbase:'+cur.id;await blobPut(k,blob);cur.plan={base:k,items:[]};touch();await visitPut(cur);
-  closeEditor(true);openEditor({mode:'draw',src:blob,items:cur.plan.items})}
-async function savePlan(){cur.plan.items=PE.items;cur.plan.edited=new Date().toISOString();touch();await visitPut(cur);closeEditor();toast('התשריט נשמר');renderVisit();fillPlanThumb()}
+  const P=plansOf(cur);const id='p'+uid();const k='planbase:'+cur.id+':'+id;await blobPut(k,blob);
+  const used=new Set(P.map(p=>p.label));const next=[...(cur.layout||[]).map(f=>f.floor).filter(Boolean)].find(f=>!used.has(f))||'';
+  P.push({id,label:next,base:k,items:[]});planIdx=P.length-1;touch();await visitPut(cur);
+  closeEditor(true);openEditor({mode:'draw',src:blob,items:[]})}
+async function savePlan(){const p=plansOf(cur)[planIdx];if(p){p.items=PE.items;p.edited=new Date().toISOString()}touch();await visitPut(cur);closeEditor();toast('התשריט נשמר');renderVisit();fillPlanThumb()}
 function closeEditor(silent){removeEventListener('resize',onPeResize);try{PE&&PE.ro&&PE.ro.disconnect()}catch(_){}$('#planEd')?.remove();PE=null;if(!silent&&cur&&tab==='plan'){renderVisit();fillPlanThumb()}}
-async function renderPlanBlob(){if(!cur.plan?.base)return null;const b=await blobGet(cur.plan.base);if(!b)return null;const img=await blobToImage(b);
-  const cv=document.createElement('canvas');cv.width=img.width;cv.height=img.height;const ctx=cv.getContext('2d');ctx.drawImage(img,0,0);drawItems(ctx,cur.plan.items||[],0);
+async function renderPlanBlob(p){if(!p?.base)return null;const b=await blobGet(p.base);if(!b)return null;const img=await blobToImage(b);
+  const cv=document.createElement('canvas');cv.width=img.width;cv.height=img.height;const ctx=cv.getContext('2d');ctx.drawImage(img,0,0);drawItems(ctx,p.items||[],0);
   return await new Promise(r=>cv.toBlob(r,'image/png'))}
 
 /* ---------------- report + sync ---------------- */
-function reportHtml(v,planUrl){const sel=(k)=>{const a=v.sel[k]||[];const n=v.notes[k]||{};return a.map(x=>n[x]?`${x} (${n[x]})`:x).join(', ')+(n._?` · ${n._}`:'')};
+function reportHtml(v,planPages){planPages=planPages||[];const sel=(k)=>{const a=v.sel[k]||[];const n=v.notes[k]||{};return a.map(x=>n[x]?`${x} (${n[x]})`:x).join(', ')+(n._?` · ${n._}`:'')};
   const cell=(l,x)=>x?`<td class="l">${esc(l)}</td><td class="v">${esc(x)}</td>`:'';
   const pairs=[];const push=(l,x)=>{if(x!==undefined&&x!==null&&String(x).trim()!=='')pairs.push([l,String(x)])};
   const sec=(title,list)=>{const p=[];list.forEach(([l,x])=>{if(x!==undefined&&x!==null&&String(x).trim()!=='')p.push([l,String(x)])});if(!p.length)return '';
@@ -458,21 +471,21 @@ function reportHtml(v,planUrl){const sel=(k)=>{const a=v.sel[k]||[];const n=v.no
     ${sec('מטבח וחוץ',g('kit'))}
     ${v.text.deviations||v.text.remarks?`<tr><td colspan="4" class="s">חריגות והערות</td></tr>${v.text.deviations?`<tr><td class="l">חריגות בנייה</td><td class="v t" colspan="3">${esc(v.text.deviations)}</td></tr>`:''}${v.text.remarks?`<tr><td class="l">הערות</td><td class="v t" colspan="3">${esc(v.text.remarks)}</td></tr>`:''}`:''}
    </table>
-   <div style="color:#5b6f66;margin-top:3px">${v.photos.length} תמונות בתיקייה "תמונות"${planUrl?' · התשריט המסומן בעמוד הבא':''}</div>
-   ${planUrl?`<div class="pp"><h2>תשריט עם סימוני הביקור ${esc(v.caseNo||'')}</h2><img src="${planUrl}"></div>`:''}
+   <div style="color:#5b6f66;margin-top:3px">${v.photos.length} תמונות בתיקייה "תמונות"${planPages.length?` · ${planPages.length>1?planPages.length+' תשריטים מסומנים בעמודים הבאים':'התשריט המסומן בעמוד הבא'}`:''}</div>
+   ${planPages.map(pp=>`<div class="pp"><h2>תשריט${pp.label?' – '+esc(pp.label):''} · סימוני הביקור ${esc(v.caseNo||'')}</h2><img src="${pp.url}"></div>`).join('')}
   </body></html>`}
-async function planJpegDataUrl(){const b=await renderPlanBlob();if(!b)return '';const img=await blobToImage(b);const s=Math.min(1,2200/Math.max(img.width,img.height));
+async function planJpegDataUrl(p){const b=await renderPlanBlob(p);if(!b)return '';const img=await blobToImage(b);const s=Math.min(1,2200/Math.max(img.width,img.height));
   const c=document.createElement('canvas');c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.85)}
 function visitData(v){const out={layout:v.layout||null,caseNo:v.caseNo,caseId:v.caseId,head:v.head,nums:v.nums,yn:v.yn,text:v.text,sel:v.sel,notes:v.notes,
-  labels:Object.fromEntries(SECTIONS.flatMap(s=>(s.groups||[]).map(g=>[g.k,g.l]))),photos:v.photos.map(p=>p.name),hasPlan:!!v.plan,app:VERSION,updated:v.updated};return out}
+  labels:Object.fromEntries(SECTIONS.flatMap(s=>(s.groups||[]).map(g=>[g.k,g.l]))),photos:v.photos.map(p=>p.name),plans:plansOf(v).map(p=>p.label||''),app:VERSION,updated:v.updated};return out}
 async function syncVisit(){if(!navigator.onLine){toast('אין חיבור לאינטרנט. הכול שמור בטאבלט, אפשר להעלות כשיהיה WiFi.');return}
   if(!cfg.bridge){toast('החיבור לדרייב עוד לא הוגדר (במסך הראשי ← הגדרות)');return}
   const btn=document.querySelector('[data-act="sync"]');const set=t=>{if(btn){btn.textContent=t;btn.disabled=true}};
   try{let i=0;const total=cur.photos.filter(p=>!p.up).length;
     for(const p of cur.photos){if(p.up)continue;i++;set(`מעלה תמונה ${i}/${total}…`);const b=await blobGet(p.k);if(!b){p.up=true;continue}
       const r=await bridgePost({action:'upload',folderId:cur.folderId,caseNo:cur.caseNo,sub:'תמונות',name:p.name,mime:'image/jpeg',data:await blobToB64(b)});if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;p.up=true;await visitPut(cur)}
-    set('מעלה טופס…');const planUrl=cur.plan?.base?await planJpegDataUrl():'';
-    const r=await bridgePost({action:'visit',folderId:cur.folderId,caseNo:cur.caseNo,json:JSON.stringify(visitData(cur)),html:reportHtml(cur,planUrl)});if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;
+    set('מעלה טופס…');const pages=[];for(const p of plansOf(cur)){const url=await planJpegDataUrl(p);if(url)pages.push({label:p.label,url})}
+    const r=await bridgePost({action:'visit',folderId:cur.folderId,caseNo:cur.caseNo,json:JSON.stringify(visitData(cur)),html:reportHtml(cur,pages)});if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;
     cur.synced=new Date().toISOString();cur.dirtyAfterSync=false;await visitPut(cur);toast('הביקור הועלה לתיקיית התיק בדרייב ✓',3500)}
   catch(e){toast(['dev','notjson'].includes(e.message)?errText(e):e.message==='key'?'המפתח שגוי. בדקו את ההגדרות.':e.message==='nofolder'?'לא נמצאה תיקיית התיק בדרייב. בדקו את מספר התיק.':'ההעלאה נעצרה. מה שהועלה נשמר, ואפשר ללחוץ שוב כדי להמשיך.',4500);await visitPut(cur)}
   renderVisit();if(tab==='photos')fillThumbs();if(tab==='plan')fillPlanThumb()}
@@ -508,11 +521,12 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
   if(b.dataset.quick){const k=b.dataset.quick;const t=(cur.text[k]||'').trim();cur.text[k]=t?t.replace(/[,،]?\s*$/,'')+', '+b.dataset.v:b.dataset.v;touch();const ta=document.querySelector(`[data-text="${k}"]`);if(ta)ta.value=cur.text[k];return}
   if(b.dataset.delph){const k=b.dataset.delph;cur.photos=cur.photos.filter(p=>p.k!==k);await blobDel(k);touch();renderVisit();fillThumbs();return}
   if(b.dataset.loadplan){const c=cases.find(x=>x.id===cur.caseId);const p=c?.plans?.find(x=>x.k===b.dataset.loadplan);const bl=await blobGet(b.dataset.loadplan);if(!bl){toast('הקובץ לא נמצא בטאבלט');return}return loadPlanSource(bl.type?bl:new Blob([bl],{type:p?.mime||''}))}
-  if(a==='editplan'){const bl=await blobGet(cur.plan.base);return openEditor({mode:'draw',src:bl,items:JSON.parse(JSON.stringify(cur.plan.items||[]))})}
-  if(a==='newplan'){if(cur.plan?.base)await blobDel(cur.plan.base);cur.plan=null;touch();await visitPut(cur);return renderVisit()}
+  if(b.dataset.editplan!==undefined){const i=+b.dataset.editplan;const p=plansOf(cur)[i];const bl=await blobGet(p.base);planIdx=i;return openEditor({mode:'draw',src:bl,items:JSON.parse(JSON.stringify(p.items||[]))})}
+  if(b.dataset.delplan!==undefined){const i=+b.dataset.delplan;const P=plansOf(cur);const p=P[i];if(!p._sure){p._sure=1;setTimeout(()=>{delete p._sure},4000);renderVisit();return fillPlanThumb()}
+    await blobDel(p.base);P.splice(i,1);touch();await visitPut(cur);renderVisit();return fillPlanThumb()}
   if(a==='sync')return syncVisit();
   if(a==='camera')return openCamera();
-  if(a==='delvisit'){if(b.dataset.sure){for(const p of cur.photos)await blobDel(p.k);if(cur.plan?.base)await blobDel(cur.plan.base);await visitDel(cur.id);toast('הביקור נמחק מהטאבלט');return home()}b.dataset.sure='1';b.textContent='לחצו שוב כדי למחוק';return}
+  if(a==='delvisit'){if(b.dataset.sure){for(const p of cur.photos)await blobDel(p.k);for(const p of plansOf(cur))await blobDel(p.base);await visitDel(cur.id);toast('הביקור נמחק מהטאבלט');return home()}b.dataset.sure='1';b.textContent='לחצו שוב כדי למחוק';return}
 });
 document.addEventListener('input',e=>{if(!cur)return;const t=e.target;
   if(t.dataset.head){cur.head[t.dataset.head]=t.value;if(t.dataset.head==='address'||t.dataset.head==='city'){cur.title=[cur.head.address,cur.head.city].filter(Boolean).join(', ')||'ביקור חדש'}touch();return}
@@ -520,6 +534,7 @@ document.addEventListener('input',e=>{if(!cur)return;const t=e.target;
   if(t.dataset.num){cur.nums[t.dataset.num]=t.value;touch();return}
   if(t.dataset.text){cur.text[t.dataset.text]=t.value;if(t.dataset.text==='layoutNote')syncLayoutText();touch();return}});
 document.addEventListener('change',async e=>{const t=e.target;
+  if(t.dataset.planlabel!==undefined&&cur){plansOf(cur)[+t.dataset.planlabel].label=t.value;touch();await visitPut(cur);return}
   if(t.dataset.floorname!==undefined&&cur){lay()[+t.dataset.floorname].floor=t.value;syncLayoutText();touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
   if(t.dataset.photo!==undefined&&t.files?.length){const again=t.dataset.again!==undefined;await addPhotos([...t.files],again);t.value='';if(again){const n=document.querySelector('input[data-again]');if(n)try{n.click()}catch(_){}}return}
   if(t.dataset.planfile!==undefined&&t.files?.[0]){const f=t.files[0];t.value='';try{await loadPlanSource(f)}catch(_){toast('לא הצלחתי לפתוח את הקובץ')}}});
