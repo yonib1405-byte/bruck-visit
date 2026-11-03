@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.4.0';
+const VERSION='1.4.1';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -451,28 +451,28 @@ async function renderPlanBlob(p){if(!p?.base)return null;const b=await blobGet(p
 
 /* ---------------- report + sync ---------------- */
 function reportHtml(v,planPages){planPages=planPages||[];const sel=(k)=>{const a=v.sel[k]||[];const n=v.notes[k]||{};return a.map(x=>n[x]?`${x} (${n[x]})`:x).join(', ')+(n._?` · ${n._}`:'')};
-  const cell=(l,x)=>x?`<td class="l">${esc(l)}</td><td class="v">${esc(x)}</td>`:'';
+  const cell=(l,x)=>x?`<td class="l" bgcolor="#e6f0fa" style="background:#e6f0fa;font-weight:bold;color:#3b4a5a">${esc(l)}</td><td class="v">${esc(x)}</td>`:'';
   const pairs=[];const push=(l,x)=>{if(x!==undefined&&x!==null&&String(x).trim()!=='')pairs.push([l,String(x)])};
   const sec=(title,list)=>{const p=[];list.forEach(([l,x])=>{if(x!==undefined&&x!==null&&String(x).trim()!=='')p.push([l,String(x)])});if(!p.length)return '';
-    let rows='';for(let i=0;i<p.length;i+=2){rows+=`<tr>${cell(p[i][0],p[i][1])}${p[i+1]?cell(p[i+1][0],p[i+1][1]):'<td class="l"></td><td class="v"></td>'}</tr>`}
-    return `<tr><td colspan="4" class="s">${esc(title)}</td></tr>${rows}`};
-  const g=id=>SECTIONS.find(s=>s.id===id).groups.map(x=>[x.l,sel(x.k)+(x.extra||[]).map(e=>v.nums[e.k]?` · ${e.l} ${v.nums[e.k]}`:'').join('')]);
+    let rows='';for(let i=0;i<p.length;i+=2){rows+=`<tr>${cell(p[i][0],p[i][1])}${p[i+1]?cell(p[i+1][0],p[i+1][1]):'<td class="v" colspan="2" style="border-top:0;border-bottom:0;border-left:0"></td>'}</tr>`}
+    return `<tr><td colspan="4" class="s" style="color:#1554a0;font-weight:bold;font-size:11.5pt;border:0;border-bottom:2px solid #1554a0;padding-top:7px">${esc(title)}</td></tr>${rows}`};
+  const g=id=>SECTIONS.find(s=>s.id===id).groups.map(x=>{let ex=(x.extra||[]).filter(e=>v.nums[e.k]).map(e=>`${e.l} ${v.nums[e.k]}`);if(x.k==='entries'&&(v.nums.entryNo||v.nums.entryOf))ex=[`כניסה ${v.nums.entryNo||'?'}${v.nums.entryOf?' מתוך '+v.nums.entryOf:''}`];return [x.l,[sel(x.k),...ex].filter(Boolean).join(' · ')]});
   const n=v.nums||{};const rooms=[n.rooms?n.rooms+' חדרים':'',n.halfRooms&&+n.halfRooms?n.halfRooms+' חצאי חדרים':''].filter(Boolean).join(' + ');
   const aptRows=[['קומה',[n.floor,n.bldFloors?'מתוך '+n.bldFloors:''].filter(Boolean).join(' ')],['דירה מס\'',n.aptNo],['חדרים',rooms],['קומות בדירה',n.aptLevels],['דירות בבניין',n.bldUnits],['דירות בכניסה',n.entryUnits],['דירות בקומה',n.floorUnits],['קומה אחרונה',v.yn?.lastFloor]];
   const head=[v.head.address,v.head.aptNo?'דירה '+v.head.aptNo:'',v.head.hood,v.head.city].filter(Boolean).join(', ');
   return `<html dir="rtl"><head><meta charset="utf-8"><style>
    @page{size:A4;margin:10mm}
    body{font-family:Arial,sans-serif;font-size:8.6pt;color:#1f3427;margin:0;direction:rtl}
-   .h{border-bottom:2px solid #c99d47;padding-bottom:3px;margin-bottom:4px}
+   .h{border-bottom:2px solid #1554a0;padding-bottom:3px;margin-bottom:4px}
    .h b{font-size:12.5pt}.h span{color:#5b6f66}
    table{width:100%;border-collapse:collapse;table-layout:fixed}
-   td{padding:2px 4px;border:1px solid #d6dfdb;vertical-align:top;word-wrap:break-word}
-   td.l{width:15%;background:#eef3f1;font-weight:bold;color:#3b5247}
-   td.v{width:35%}
-   td.s{color:#1f3427;font-weight:bold;font-size:9.2pt;padding:4px 4px 1px;border:0;border-bottom:2px solid #c99d47}
+   td{padding:2px 5px;border:1px solid #c9d6e3;vertical-align:top;word-wrap:break-word}
+   td.l{width:15%;background:#e6f0fa;font-weight:bold;color:#3b4a5a}
+   td.v{width:35%;color:#111;background:#fff}
+   td.s{color:#1554a0;font-weight:bold;font-size:11.5pt;padding:7px 4px 2px;border:0;border-bottom:2px solid #1554a0;background:#fff}
    .t{white-space:pre-line}
    .pp{page-break-before:always;text-align:center}
-   .pp h2{font-size:12pt;margin:0 0 6px;text-align:right;border-bottom:2px solid #c99d47}
+   .pp h2{font-size:12pt;margin:0 0 6px;text-align:right;color:#1554a0;border-bottom:2px solid #1554a0}
    .pp img{max-width:100%;max-height:260mm}
   </style></head><body>
    <div class="h"><b>טופס ביקור בנכס ${esc(v.caseNo||'')}</b> &nbsp; <span>${esc(head)}</span></div>
@@ -481,10 +481,10 @@ function reportHtml(v,planPages){planPages=planPages||[];const sel=(k)=>{const a
     ${sec('סביבה',g('env'))}
     ${sec('בניין',g('bld'))}
     ${sec('דירה',aptRows)}
-    ${v.text.layout?`<tr><td class="l">חלוקה פנימית</td><td class="v t" colspan="3">${esc(v.text.layout)}</td></tr>`:''}
+    ${v.text.layout?`<tr><td class="l" bgcolor="#e6f0fa" style="background:#e6f0fa;font-weight:bold;color:#3b4a5a">חלוקה פנימית</td><td class="v t" colspan="3">${esc(v.text.layout)}</td></tr>`:''}
     ${sec('גמרים',g('fin'))}
     ${sec('מטבח וחוץ',g('kit'))}
-    ${v.text.deviations||v.text.remarks?`<tr><td colspan="4" class="s">חריגות והערות</td></tr>${v.text.deviations?`<tr><td class="l">חריגות בנייה</td><td class="v t" colspan="3">${esc(v.text.deviations)}</td></tr>`:''}${v.text.remarks?`<tr><td class="l">הערות</td><td class="v t" colspan="3">${esc(v.text.remarks)}</td></tr>`:''}`:''}
+    ${v.text.deviations||v.text.remarks?`<tr><td colspan="4" class="s" style="color:#1554a0;font-weight:bold;font-size:11.5pt;border:0;border-bottom:2px solid #1554a0;padding-top:7px">חריגות והערות</td></tr>${v.text.deviations?`<tr><td class="l" bgcolor="#e6f0fa" style="background:#e6f0fa;font-weight:bold;color:#3b4a5a">חריגות בנייה</td><td class="v t" colspan="3">${esc(v.text.deviations)}</td></tr>`:''}${v.text.remarks?`<tr><td class="l" bgcolor="#e6f0fa" style="background:#e6f0fa;font-weight:bold;color:#3b4a5a">הערות</td><td class="v t" colspan="3">${esc(v.text.remarks)}</td></tr>`:''}`:''}
    </table>
    <div style="color:#5b6f66;margin-top:3px">${v.photos.length} תמונות בתיקייה "תמונות"${planPages.length?` · ${planPages.length>1?planPages.length+' תשריטים מסומנים בעמודים הבאים':'התשריט המסומן בעמוד הבא'}`:''}</div>
    ${planPages.map(pp=>`<div class="pp"><h2>תשריט${pp.label?' – '+esc(pp.label):''} · סימוני הביקור ${esc(v.caseNo||'')}</h2><img src="${pp.url}"></div>`).join('')}
