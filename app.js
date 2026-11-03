@@ -383,11 +383,11 @@ function pd(e){penDiag(e);const st=$('#peStage');try{st.setPointerCapture(e.poin
   if(PE.mode==='crop'){PE.prevCrop=PE.crop;PE.crop={x1:w.x,y1:w.y,x2:w.x,y2:w.y};PE.drag=true;peDraw();return}
   // mark sizes follow the plan, not the zoom: the same size wherever and however zoomed you draw
   const U=Math.max(PE.img.width,PE.img.height)/1000;
-  const t=PE.tool,c=PE.color,lw=Math.max(1.5,1.8*U),fs=Math.max(12,16*U);
+  const t=PE.tool,c=PE.color,lw=Math.max(1.5,2.2*U),fs=Math.max(12,24*U);
   if(t==='pen')PE.cur={t:'pen',c,lw,p:[w]};
-  else if(t==='measure')PE.cur={t:'measure',c,lw:Math.max(1.5,1.8*U),x1:w.x,y1:w.y,x2:w.x,y2:w.y,fs};
-  else if(t==='area')PE.cur={t:'area',c:'#dc2626',lw:Math.max(1.5,1.8*U),p:[w],fs};
-  else if(t==='check'){PE.items.push({t:'check',c,x:w.x,y:w.y,z:Math.max(14,18*U)})}
+  else if(t==='measure')PE.cur={t:'measure',c,lw:Math.max(1.5,2.2*U),x1:w.x,y1:w.y,x2:w.x,y2:w.y,fs};
+  else if(t==='area')PE.cur={t:'area',c:'#dc2626',lw:Math.max(1.5,2.2*U),p:[w],fs};
+  else if(t==='check'){PE.items.push({t:'check',c,x:w.x,y:w.y,z:Math.max(14,28*U)})}
   else if(t==='text'){PE.penActive=false;askText('טקסט על התשריט','').then(v=>{if(v){PE.items.push({t:'text',c,x:w.x,y:w.y,txt:v,fs});peDraw()}})}
   else if(t==='erase'){eraseAt(w,14*px)}
   peDraw()}
