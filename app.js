@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.3.1';
+const VERSION='1.3.2';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -328,7 +328,7 @@ function peToolbar(){const tb=$('#peTb');
   tb.innerHTML=T.map(([k,l])=>`<button type="button" data-tool="${k}" aria-pressed="${PE.tool===k}">${l}</button>`).join('')+
    `<button type="button" data-color="#1d4ed8" aria-pressed="${PE.color==='#1d4ed8'}" style="color:#7aa2ff">● כחול</button><button type="button" data-color="#dc2626" aria-pressed="${PE.color==='#dc2626'}" style="color:#ff8a8a">● אדום</button>
    <button type="button" data-pe="undo">↶ ביטול</button><span class="sp"></span><button type="button" data-pe="save">שמירה וסגירה</button><button type="button" data-pe="close">יציאה</button>`;
-  const tips={pen:'כותבים ומסמנים בעט · כפתור העט לחוץ = מחיקה · אצבעות: הזזה והגדלה',check:'נגיעה בעט מוסיפה ✓ ליד מידה תואמת',measure:'מותחים קו בעט, ואז מקלידים את המידה שנמדדה',area:'מקיפים בעט את אזור החריגה, ואז כותבים הערה',text:'נגיעה בעט ואז מקלידים טקסט',erase:'נגיעה על סימון מוחקת אותו'};
+  const tips={pen:'כותבים ומסמנים בעט · אצבעות: הזזה והגדלה',check:'נגיעה בעט מוסיפה ✓ ליד מידה תואמת',measure:'מותחים קו בעט, ואז מקלידים את המידה שנמדדה',area:'מקיפים בעט את אזור החריגה, ואז כותבים הערה',text:'נגיעה בעט ואז מקלידים טקסט',erase:'נגיעה על סימון מוחקת אותו'};
   $('#peMsg').textContent=tips[PE.tool]}
 function w2s(p){return {x:p.x*PE.view.s+PE.view.x,y:p.y*PE.view.s+PE.view.y}}
 function s2w(x,y){return {x:(x-PE.view.x)/PE.view.s,y:(y-PE.view.y)/PE.view.s}}
@@ -373,7 +373,6 @@ function penDiag(e){const d=$('#penDiag');if(!d)return;if(e.type==='pointermove'
 function penAsTouch(e,x,y){const h=PE.hover;if(h&&performance.now()-h.t<600&&Math.hypot(h.x-x,h.y-y)<80)return true;return (e.width<=3&&e.height<=3&&e.pressure>=.99)}
 function pd(e){penDiag(e);const st=$('#peStage');try{st.setPointerCapture(e.pointerId)}catch(_){}const r=st.getBoundingClientRect();const x=e.clientX-r.left,y=e.clientY-r.top;
   if(e.pointerType==='touch'){
-    if(PE.mode!=='crop'&&!PE.penActive&&penAsTouch(e,x,y)){PE.erasing=true;PE.erasePtr=e.pointerId;$('#peMsg').textContent='מחיקה (כפתור העט לחוץ)';eraseAt(s2w(x,y),14/PE.view.s);return}
     if(PE.penActive)return; // palm resting while writing with the pen
     if(PE.mode==='crop'&&PE.pointers.size===0){PE.pointers.set(e.pointerId,{x,y,crop:true});const w=s2w(x,y);PE.crop={x1:w.x,y1:w.y,x2:w.x,y2:w.y};PE.drag=true;peDraw();return}
     for(const [k,v] of PE.pointers){if(v.crop){v.crop=false;PE.drag=false;PE.crop=PE.prevCrop||null}}
