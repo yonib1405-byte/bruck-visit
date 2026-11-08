@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.4.1';
+const VERSION='1.4.2';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -195,7 +195,7 @@ function renderVisit(){$('#backBtn').classList.remove('hidden');$('#title').text
 function filledCount(s){if(!s.groups)return s.id==='photos'?cur.photos.length:0;return s.groups.filter(g=>(cur.sel[g.k]||[]).length).length}
 
 /* ---------------- internal layout (חלוקה פנימית) ---------------- */
-const SPACES=['מבואה','חדר מגורים','מטבח','פינת אוכל','פינת משפחה','יחידת הורים','חדר שינה','ממ"ד','חדר רחצה','תא שירותים','חדר ארונות','חדר כביסה','מרפסת שירות','מרפסת שמש','מרפסת','חצר','מחסן','חלל','חדר עבודה','גלריה','מעבר'];
+const SPACES=['מבואה','חדר מגורים','מטבח','פינת אוכל','פינת משפחה','יחידת הורים','חדר שינה','ממ"ד','חדר רחצה','תא שירותים','חדר ארונות','חדר כביסה','מרפסת שירות','מרפסת שמש','מרפסת','חצר','מחסן','חלל','חדר עבודה','גלריה','מעבר','חצי חדר'];
 const PLURAL={'חדר שינה':'חדרי שינה','חדר רחצה':'חדרי רחצה','תא שירותים':'תאי שירותים','מרפסת שמש':'מרפסות שמש','מרפסת':'מרפסות','מחסן':'מחסנים','חדר עבודה':'חדרי עבודה','חדר ארונות':'חדרי ארונות','מרפסת שירות':'מרפסות שירות','חלל':'חללים','ממ"ד':'ממ"דים','חצר':'חצרות','מעבר':'מעברים'};
 const FLOORS=['קומת מרתף','קומת קרקע','קומה א\'','קומה ב\'','קומה ג\'','קומת גלריה','קומת גג'];
 let addTo=null; // {f, i} when choosing a sub-space ("כולל") for an item
@@ -203,8 +203,8 @@ function lay(){if(!cur.layout)cur.layout=[{floor:'',items:[],mamadRoom:false}];r
 const vav=w=>'ו'+w;
 function joinHe(arr){if(arr.length<2)return arr.join('');return arr.slice(0,-1).join(', ')+' '+vav(arr[arr.length-1])}
 function floorText(fl){const groups=[];const seen={};
-  fl.items.forEach(it=>{const subs=it.subs||[];if(!subs.length){if(seen[it.n]!==undefined){groups[seen[it.n]].c++;return}seen[it.n]=groups.length;groups.push({n:it.n,c:1})}else groups.push({n:it.n,c:1,subs})});
-  const parts=groups.map(g=>{let t=g.c>1?`${g.c} ${PLURAL[g.n]||g.n}`:g.n;
+  fl.items.forEach(it=>{const subs=it.subs||[];const w=it.half?0.5:1;if(!subs.length){if(seen[it.n]!==undefined){groups[seen[it.n]].c+=w;return}seen[it.n]=groups.length;groups.push({n:it.n,c:w})}else groups.push({n:it.n,c:w,subs})});
+  const parts=groups.map(g=>{let t=g.c>1?`${g.c} ${PLURAL[g.n]||g.n}`:g.c===0.5?(g.n==='חצי חדר'?g.n:'חצי '+g.n):g.n;
     if(g.n==='חדר שינה'&&fl.mamadRoom)t+=g.c>1?' (אחד מהם ממ"ד)':' (משמש כממ"ד)';
     if(g.subs)t+=' עם '+joinHe(g.subs);return t});
   return joinHe(parts)}
@@ -212,11 +212,11 @@ function layoutText(){const L=lay();const multi=L.length>1||L.some(f=>f.floor);
   return L.filter(f=>f.items.length).map(f=>(multi&&f.floor?f.floor+' - ':'')+floorText(f)).join('\n')}
 function syncLayoutText(){cur.text.layout=layoutText()+(cur.text.layoutNote?((layoutText()?'\n':'')+cur.text.layoutNote):'')}
 function layoutHtml(){const L=lay();
-  return `<div class="grp"><div class="lbl">חלוקה פנימית <small>לוחצים על החללים לפי הסדר · "+ כולל" מוסיף חלק לאותו חלל (למשל מטבח עם מרפסת שירות)</small></div>
+  return `<div class="grp"><div class="lbl">חלוקה פנימית <small>לוחצים על החללים לפי הסדר · "+ כולל" מוסיף חלק לאותו חלל (למשל מטבח עם מרפסת שירות) · "חצי חדר" מוסיף חצי לחלל שנלחץ לפניו</small></div>
    ${L.map((fl,f)=>`<div class="floor">
      <div class="row" style="gap:8px;margin-bottom:8px">${L.length>1||fl.floor?`<select class="t" data-floorname="${f}" style="width:auto;min-width:160px"><option value="">בחירת קומה…</option>${FLOORS.map(x=>`<option ${x===fl.floor?'selected':''}>${esc(x)}</option>`).join('')}${fl.floor&&!FLOORS.includes(fl.floor)?`<option selected>${esc(fl.floor)}</option>`:''}</select>`:''}
        ${L.length>1?`<button class="btn danger" type="button" data-delfloor="${f}" style="min-height:40px;padding:6px 12px">הסרת הקומה</button>`:''}</div>
-     <div class="items">${fl.items.map((it,i)=>`<span class="item${addTo&&addTo.f===f&&addTo.i===i?' on':''}"><b>${esc(it.n)}</b>${(it.subs||[]).map((sb,j)=>`<span class="sub">+ ${esc(sb)}<button type="button" data-delsub="${f}:${i}:${j}" aria-label="הסרה">×</button></span>`).join('')}<button type="button" class="incl" data-incl="${f}:${i}">+ כולל</button><button type="button" class="x" data-delitem="${f}:${i}" aria-label="הסרה">×</button></span>`).join('')||'<span class="hint">עוד לא נבחרו חללים בקומה הזו.</span>'}</div>
+     <div class="items">${fl.items.map((it,i)=>`<span class="item${addTo&&addTo.f===f&&addTo.i===i?' on':''}"><b>${it.half?'½ ':''}${esc(it.n)}</b>${(it.subs||[]).map((sb,j)=>`<span class="sub">+ ${esc(sb)}<button type="button" data-delsub="${f}:${i}:${j}" aria-label="הסרה">×</button></span>`).join('')}<button type="button" class="incl" data-incl="${f}:${i}">+ כולל</button><button type="button" class="x" data-delitem="${f}:${i}" aria-label="הסרה">×</button></span>`).join('')||'<span class="hint">עוד לא נבחרו חללים בקומה הזו.</span>'}</div>
      ${addTo&&addTo.f===f?`<div class="hint" style="margin:8px 0 4px;color:var(--warn);font-weight:700">בחרו מה כלול ב"${esc(fl.items[addTo.i]?.n||'')}" <button type="button" class="btn" data-incldone style="min-height:36px;padding:4px 12px">סיום</button></div>`:''}
      <div class="chips" style="margin-top:8px">${SPACES.map(x=>`<button type="button" class="chip sp" data-space="${f}" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>
      ${fl.items.some(it=>it.n==='חדר שינה')?`<div class="chips" style="margin-top:8px"><button type="button" class="chip" data-mamadroom="${f}" aria-pressed="${!!fl.mamadRoom}">אחד מחדרי השינה הוא ממ"ד</button></div>`:''}
@@ -538,7 +538,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
     SECTIONS.flatMap(s=>s.groups||[]).filter(x=>x.mIf&&x.mIf.k===g.k&&!isMulti(x)&&(cur.sel[x.k]||[]).length>1).forEach(x=>{cur.sel[x.k]=cur.sel[x.k].slice(0,1)});
     touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
   if(b.dataset.space!==undefined){const f=+b.dataset.space;const L=lay();
-    if(addTo&&addTo.f===f){const it=L[f].items[addTo.i];(it.subs||(it.subs=[])).push(b.dataset.v)}else{L[f].items.push({n:b.dataset.v,subs:[]})}
+    if(addTo&&addTo.f===f){const it=L[f].items[addTo.i];(it.subs||(it.subs=[])).push(b.dataset.v)}else if(b.dataset.v==='חצי חדר'&&L[f].items.length){const prev=L[f].items[L[f].items.length-1];L[f].items.push({n:prev.n,half:true,subs:[]})}else{L[f].items.push({n:b.dataset.v,subs:[]})}
     syncLayoutText();touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
   if(b.dataset.incl){const [f,i]=b.dataset.incl.split(':').map(Number);addTo=addTo&&addTo.f===f&&addTo.i===i?null:{f,i};const y=scrollY;renderVisit();scrollTo(0,y);return}
   if(b.hasAttribute('data-incldone')){addTo=null;const y=scrollY;renderVisit();scrollTo(0,y);return}
