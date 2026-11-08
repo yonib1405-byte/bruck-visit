@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.4.2';
+const VERSION='1.4.3';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -212,7 +212,7 @@ function layoutText(){const L=lay();const multi=L.length>1||L.some(f=>f.floor);
   return L.filter(f=>f.items.length).map(f=>(multi&&f.floor?f.floor+' - ':'')+floorText(f)).join('\n')}
 function syncLayoutText(){cur.text.layout=layoutText()+(cur.text.layoutNote?((layoutText()?'\n':'')+cur.text.layoutNote):'')}
 function layoutHtml(){const L=lay();
-  return `<div class="grp"><div class="lbl">חלוקה פנימית <small>לוחצים על החללים לפי הסדר · "+ כולל" מוסיף חלק לאותו חלל (למשל מטבח עם מרפסת שירות) · "חצי חדר" מוסיף חצי לחלל שנלחץ לפניו</small></div>
+  return `<div class="grp"><div class="lbl">חלוקה פנימית <small>לוחצים על החללים לפי הסדר · "+ כולל" מוסיף חלק לאותו חלל (למשל מטבח עם מרפסת שירות) · "חצי חדר" נספר כחצי חדר שינה</small></div>
    ${L.map((fl,f)=>`<div class="floor">
      <div class="row" style="gap:8px;margin-bottom:8px">${L.length>1||fl.floor?`<select class="t" data-floorname="${f}" style="width:auto;min-width:160px"><option value="">בחירת קומה…</option>${FLOORS.map(x=>`<option ${x===fl.floor?'selected':''}>${esc(x)}</option>`).join('')}${fl.floor&&!FLOORS.includes(fl.floor)?`<option selected>${esc(fl.floor)}</option>`:''}</select>`:''}
        ${L.length>1?`<button class="btn danger" type="button" data-delfloor="${f}" style="min-height:40px;padding:6px 12px">הסרת הקומה</button>`:''}</div>
@@ -538,7 +538,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
     SECTIONS.flatMap(s=>s.groups||[]).filter(x=>x.mIf&&x.mIf.k===g.k&&!isMulti(x)&&(cur.sel[x.k]||[]).length>1).forEach(x=>{cur.sel[x.k]=cur.sel[x.k].slice(0,1)});
     touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
   if(b.dataset.space!==undefined){const f=+b.dataset.space;const L=lay();
-    if(addTo&&addTo.f===f){const it=L[f].items[addTo.i];(it.subs||(it.subs=[])).push(b.dataset.v)}else if(b.dataset.v==='חצי חדר'&&L[f].items.length){const prev=L[f].items[L[f].items.length-1];L[f].items.push({n:prev.n,half:true,subs:[]})}else{L[f].items.push({n:b.dataset.v,subs:[]})}
+    if(addTo&&addTo.f===f){const it=L[f].items[addTo.i];(it.subs||(it.subs=[])).push(b.dataset.v)}else if(b.dataset.v==='חצי חדר'){L[f].items.push({n:'חדר שינה',half:true,subs:[]})}else{L[f].items.push({n:b.dataset.v,subs:[]})}
     syncLayoutText();touch();const y=scrollY;renderVisit();scrollTo(0,y);return}
   if(b.dataset.incl){const [f,i]=b.dataset.incl.split(':').map(Number);addTo=addTo&&addTo.f===f&&addTo.i===i?null:{f,i};const y=scrollY;renderVisit();scrollTo(0,y);return}
   if(b.hasAttribute('data-incldone')){addTo=null;const y=scrollY;renderVisit();scrollTo(0,y);return}
