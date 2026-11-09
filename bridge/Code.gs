@@ -5,6 +5,7 @@
  *
  * לפני הפריסה: שנו את KEY למילה סודית משלכם (אותה מילה מוזנת במערכת התיקים).
  * גרסה 2: העלאת תמונות במקביל (מהיר יותר).
+ * גרסה 3: דף הביקור נשמר בשם "דף ביקור - כתובת הנכס".
  */
 const KEY = 'CHANGE-ME';
 const PARENT_ID = '1pd6vpfouPGmAWrCkISrXzpz19cIxEunl'; // התיקייה "שומות פרטיות"
@@ -69,7 +70,10 @@ function doPost(e) {
         const no = b.caseNo ? ' ' + b.caseNo : '';
         const stamp = Utilities.formatDate(new Date(), 'Asia/Jerusalem', 'yyyy-MM-dd HH.mm');
         folder.createFile(Utilities.newBlob(b.json, 'application/json', 'ביקור בנכס' + no + ' (' + stamp + ').json'));
-        const pdf = Utilities.newBlob(b.html, 'text/html', 'visit.html').getAs('application/pdf').setName('טופס ביקור בנכס' + no + ' (' + stamp + ').pdf');
+        // PDF name: "דף ביקור - <address>". A second upload of the same visit keeps the earlier file and adds the time to the new one.
+        let pdfName = b.pdfName ? String(b.pdfName) : 'טופס ביקור בנכס' + no;
+        if (findFile_(folder, pdfName + '.pdf')) pdfName += ' (' + stamp + ')';
+        const pdf = Utilities.newBlob(b.html, 'text/html', 'visit.html').getAs('application/pdf').setName(pdfName + '.pdf');
         folder.createFile(pdf);
         return out({ ok: true, folderId: folder.getId() });
       }

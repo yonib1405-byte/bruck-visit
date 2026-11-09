@@ -1,7 +1,7 @@
 /* Bruck · ביקור בנכס — offline-first visit app.
    Data lives in IndexedDB on the tablet; "סנכרון" sends it through the Google Apps Script bridge to the case folder in Drive. */
 'use strict';
-const VERSION='1.4.3';
+const VERSION='1.4.4';
 
 /* ---------------- form schema (from the paper visit form) ---------------- */
 const SECTIONS=[
@@ -515,7 +515,7 @@ async function syncVisit(){if(!navigator.onLine){toast('אין חיבור לאי
     const lanes=photosId?3:1;let idx=0;
     await Promise.all(Array.from({length:Math.min(lanes,total)},async()=>{while(idx<todo.length){const p=todo[idx++];await one(p)}}));
     set('מעלה טופס…');const pages=[];for(const p of plansOf(cur)){const url=await planJpegDataUrl(p);if(url)pages.push({label:p.label,url})}
-    const r=await withRetry(()=>bridgePost({action:'visit',folderId:cur.folderId,caseNo:cur.caseNo,json:JSON.stringify(visitData(cur)),html:reportHtml(cur,pages)}),2);if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;
+    const r=await withRetry(()=>bridgePost({action:'visit',folderId:cur.folderId,caseNo:cur.caseNo,pdfName:'דף ביקור - '+([cur.head.address,cur.head.city].map(x=>(x||'').trim()).filter(Boolean).join(' ')||cur.caseNo||'נכס').replace(/[\\/:*?<>|]/g,' ').replace(/"/g,'״'),json:JSON.stringify(visitData(cur)),html:reportHtml(cur,pages)}),2);if(r.folderId&&!cur.folderId)cur.folderId=r.folderId;
     cur.synced=new Date().toISOString();cur.dirtyAfterSync=false;await visitPut(cur);toast('הביקור הועלה לתיקיית התיק בדרייב ✓',3500)}
   catch(e){toast(['dev','notjson'].includes(e.message)?errText(e):e.message==='key'?'המפתח שגוי. בדקו את ההגדרות.':e.message==='nofolder'?'לא נמצאה תיקיית התיק בדרייב. בדקו את מספר התיק.':'ההעלאה נעצרה. מה שהועלה נשמר, ואפשר ללחוץ שוב כדי להמשיך.',4500);await visitPut(cur)}
   finally{try{wake&&wake.release()}catch(_){}}
